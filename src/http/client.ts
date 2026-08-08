@@ -115,15 +115,19 @@ export function assertSharepointUrl(raw: string): URL {
 export class SharepointClient {
   private digestProvider: DigestProvider | null = null;
 
-  private readonly dispatcher: Agent;
+  private dispatcher: Agent | undefined;
 
   constructor(
     private readonly session: SharepointSession,
     private readonly opts: ClientOpts,
   ) {
-    this.dispatcher = new Agent({
-      connect: { timeout: opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS },
-    });
+    try {
+      this.dispatcher = new Agent({
+        connect: { timeout: opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS },
+      });
+    } catch {
+      this.dispatcher = undefined;
+    }
   }
 
   setDigestProvider(fn: DigestProvider): void {
@@ -181,8 +185,8 @@ export class SharepointClient {
           body,
           signal: ctrl.signal,
           redirect: 'follow',
-          dispatcher: this.dispatcher,
-        } as RequestInit & { dispatcher: Agent });
+          ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
+        } as RequestInit & { dispatcher?: Agent });
       } catch (err) {
         lastErr = err;
         if ((err as Error).name === 'AbortError') {
@@ -190,6 +194,17 @@ export class SharepointClient {
             'TIMEOUT',
             `request timed out after ${this.opts.httpTimeoutMs}ms: ${url}`,
           );
+        }
+        // The standalone undici Agent is only accepted by a built-in fetch of a
+        // matching undici version. Node 26 accepts it; Node 24 on the VPS
+        // rejects it with UND_ERR_INVALID_ARG before a single byte is sent.
+        // Drop the dispatcher for the rest of the process and retry: a longer
+        // connect timeout is an optimisation, never a requirement, and the
+        // alternative is a CLI that simply does not run on the VPS.
+        if (errorCodeOf(err) === 'UND_ERR_INVALID_ARG' && this.dispatcher !== undefined) {
+          this.dispatcher = undefined;
+          attempt--; // this attempt never reached the network
+          continue;
         }
         // A body cannot be replayed once consumed, so never retry those.
         if (!isRetryableNetworkError(err) || body !== undefined) break;
