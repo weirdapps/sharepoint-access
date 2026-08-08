@@ -44,12 +44,6 @@ response. The chunked uploader slices an already-resident Buffer, so chunking
 bounds the request size but not memory: a multi-gigabyte file exhausts the heap.
 Streaming both directions is the fix. See `docs/design/security-audit.md` L1.
 
-### P6: Sonar project must be created
-
-`sonar-project.properties` declares `weirdapps_sharepoint-access`. The
-SonarCloud project does not exist yet, so `sonarcloud.yml` will fail until it is
-created or the workflow is removed.
-
 ## Completed
 
 ### P1: Config no-fallback exception (resolved 2026-08-08)
@@ -68,3 +62,8 @@ required CI job.
 
 The scaffold-only code 7 is gone; the enum is back to the 0-6 range shared with
 `outlook-cli` and `teams-cli`, with a test asserting it stays that way.
+
+### P6: SonarCloud (resolved 2026-08-08)
+
+Not needed after all. The first push ran `SonarCloud Analysis` to success
+alongside `CI`, so the project resolved without manual creation.
