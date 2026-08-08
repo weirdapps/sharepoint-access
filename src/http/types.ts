@@ -22,6 +22,8 @@ export interface SpFile {
 export interface SpFolderListing {
   Name?: string;
   ServerRelativeUrl?: string;
+  Exists?: boolean;
+  ItemCount?: number;
   Folders?: SpFolder[];
   Files?: SpFile[];
 }

@@ -18,7 +18,7 @@ interface ContextInfo {
  * method makes that cycle unrepresentable.
  */
 interface DigestSource {
-  contextInfo<T>(): Promise<T>;
+  contextInfo<T>(web: string): Promise<T>;
 }
 
 /** Applied when SharePoint omits the timeout. Deliberately pessimistic. */
@@ -26,35 +26,57 @@ const FALLBACK_TTL_S = 60;
 /** Covers clock skew and uploads that start just before expiry. */
 const SAFETY_MARGIN_MS = 60_000;
 
+interface Entry {
+  value: string | null;
+  expiresAtMs: number;
+  inflight: Promise<string> | null;
+}
+
+/**
+ * Keyed by WEB, because digests are web-scoped. Verified on the live tenant
+ * 2026-08-08: a digest minted at the host root and presented to a
+ * /personal/<user> web is rejected 403 with the stale-validation marker, while
+ * one minted at that web succeeds. A single global cache therefore breaks
+ * every write outside the root web, and does so with an error that reads like
+ * expiry rather than mis-scoping.
+ */
 export class DigestCache {
-  private value: string | null = null;
-  private expiresAtMs = 0;
-  private inflight: Promise<string> | null = null;
+  private readonly byWeb = new Map<string, Entry>();
 
   constructor(
     private readonly client: DigestSource,
     private readonly now: () => number = () => Date.now(),
   ) {}
 
-  async get(force = false): Promise<string> {
-    if (!force && this.value !== null && this.now() < this.expiresAtMs) {
-      return this.value;
+  private entry(web: string): Entry {
+    let e = this.byWeb.get(web);
+    if (!e) {
+      e = { value: null, expiresAtMs: 0, inflight: null };
+      this.byWeb.set(web, e);
     }
-    // Collapse concurrent callers onto a single in-flight request.
-    if (!force && this.inflight) return this.inflight;
+    return e;
+  }
 
-    const p = this.fetch();
-    this.inflight = p;
+  async get(web = '', force = false): Promise<string> {
+    const e = this.entry(web);
+    if (!force && e.value !== null && this.now() < e.expiresAtMs) {
+      return e.value;
+    }
+    // Collapse concurrent callers for the SAME web onto one request.
+    if (!force && e.inflight) return e.inflight;
+
+    const p = this.fetch(web, e);
+    e.inflight = p;
     try {
       return await p;
     } finally {
       // Clear on failure too, so a transient error is not cached forever.
-      if (this.inflight === p) this.inflight = null;
+      if (e.inflight === p) e.inflight = null;
     }
   }
 
-  private async fetch(): Promise<string> {
-    const info = await this.client.contextInfo<ContextInfo>();
+  private async fetch(web: string, e: Entry): Promise<string> {
+    const info = await this.client.contextInfo<ContextInfo>(web);
     const digest = info?.FormDigestValue;
     if (typeof digest !== 'string' || digest.length === 0) {
       throw new Error('contextinfo returned no FormDigestValue');
@@ -63,10 +85,10 @@ export class DigestCache {
       typeof info.FormDigestTimeoutSeconds === 'number' && info.FormDigestTimeoutSeconds > 0
         ? info.FormDigestTimeoutSeconds
         : FALLBACK_TTL_S;
-    this.value = digest;
+    e.value = digest;
     // With the fallback TTL this lands at `now`, so the next call refetches.
     // That pessimism is intended when SharePoint omits the field.
-    this.expiresAtMs = this.now() + ttlS * 1000 - SAFETY_MARGIN_MS;
+    e.expiresAtMs = this.now() + ttlS * 1000 - SAFETY_MARGIN_MS;
     return digest;
   }
 }

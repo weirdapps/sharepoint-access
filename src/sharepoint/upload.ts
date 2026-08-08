@@ -20,8 +20,8 @@ export interface UploadResult {
 
 type Writer = Pick<SharepointClient, 'postBinary' | 'postJson'>;
 
-function addUsingPath(folder: string, leaf: string, overwrite: boolean): string {
-  return `${folderApi(folder)}/Files/addUsingPath(DecodedUrl='${encodeLeaf(leaf)}',overwrite=${overwrite})`;
+function addUsingPath(folder: string, leaf: string, overwrite: boolean, site?: string): string {
+  return `${folderApi(folder, site)}/Files/addUsingPath(DecodedUrl='${encodeLeaf(leaf)}',overwrite=${overwrite})`;
 }
 
 export async function uploadFile(
@@ -30,20 +30,21 @@ export async function uploadFile(
   remoteFolder: string,
   leaf: string,
   overwrite: boolean,
+  site?: string,
 ): Promise<UploadResult> {
   const folder = normalizeServerRelative(remoteFolder);
   const target = joinPath(folder, leaf);
 
   if (bytes.length < CHUNK_THRESHOLD_BYTES) {
-    await client.postBinary(addUsingPath(folder, leaf, overwrite), bytes);
+    await client.postBinary(addUsingPath(folder, leaf, overwrite, site), bytes);
     return { serverRelativeUrl: target, size: bytes.length, chunked: false };
   }
 
   // SPO requires the target to exist before a chunked session can start.
-  await client.postBinary(addUsingPath(folder, leaf, overwrite), Buffer.alloc(0));
+  await client.postBinary(addUsingPath(folder, leaf, overwrite, site), Buffer.alloc(0));
 
   const uploadId = randomUUID();
-  const file = fileApi(target);
+  const file = fileApi(target, site);
   try {
     const first = bytes.subarray(0, CHUNK_SIZE_BYTES);
     await client.postBinary(`${file}/StartUpload(uploadId=guid'${uploadId}')`, Buffer.from(first));

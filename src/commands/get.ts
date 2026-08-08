@@ -27,12 +27,13 @@ export async function runGet(
   client: Reader,
   pathOrUrl: string,
   outPath?: string,
+  site?: string,
 ): Promise<GetResult> {
   // An absolute URL goes through unchanged: the client host-checks it before
   // attaching cookies. A server-relative path gets the $value accessor.
   const target = isAbsoluteUrl(pathOrUrl)
     ? pathOrUrl
-    : `${fileApi(normalizeServerRelative(pathOrUrl))}/$value`;
+    : `${fileApi(normalizeServerRelative(pathOrUrl), site)}/$value`;
 
   const res = await client.getBinary(target);
 

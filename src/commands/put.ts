@@ -14,6 +14,7 @@ export async function runPut(
   localPath: string,
   remoteFolder: string,
   overwrite: boolean,
+  site?: string,
 ): Promise<UploadResult> {
   let bytes: Buffer;
   try {
@@ -31,5 +32,5 @@ export async function runPut(
   if (leaf.length === 0 || leaf === '.' || leaf === '..') {
     throw new CliError('CONFIG_INVALID', `cannot derive a filename from "${localPath}"`);
   }
-  return uploadFile(client, bytes, remoteFolder, leaf, overwrite);
+  return uploadFile(client, bytes, remoteFolder, leaf, overwrite, site);
 }

@@ -82,6 +82,31 @@ describe('client wired to digest cache', () => {
     expect(urls.filter((u) => u.endsWith('/_api/contextinfo')).length).toBe(1);
   });
 
+  it('mints the digest from the sub-site web when writing to a sub-site', async () => {
+    // Live-verified 2026-08-08: a root-web digest presented to a /personal
+    // web is rejected 403 with the stale-validation marker. Getting this wrong
+    // breaks every write outside the root web, and the error reads like
+    // expiry rather than mis-scoping.
+    await runMkdir(wired(), '/personal/u/Documents/New');
+    const ctx = fetchMock.mock.calls.find((c) => (c[0] as string).endsWith('/_api/contextinfo'));
+    expect(ctx?.[0]).toBe('https://x.sharepoint.com/personal/u/_api/contextinfo');
+    const write = fetchMock.mock.calls.find((c) => (c[0] as string).includes('addUsingPath'));
+    expect(write?.[0]).toContain('/personal/u/_api/web/folders/');
+  });
+
+  it('keeps a separate cached digest per web', async () => {
+    const client = wired();
+    await runMkdir(client, '/personal/u/Documents/A');
+    await runMkdir(client, '/sites/s/Docs/B');
+    const ctxUrls = fetchMock.mock.calls
+      .map((c) => c[0] as string)
+      .filter((u) => u.endsWith('/_api/contextinfo'));
+    expect(ctxUrls).toEqual([
+      'https://x.sharepoint.com/personal/u/_api/contextinfo',
+      'https://x.sharepoint.com/sites/s/_api/contextinfo',
+    ]);
+  });
+
   it('runs a full auth-check against the wired graph without recursing', async () => {
     const r = await runAuthCheck(wired());
     expect(r.overall).toBe('ok');

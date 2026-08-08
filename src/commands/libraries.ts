@@ -2,6 +2,7 @@
 
 import type { SharepointClient } from '../http/client';
 import type { SpListsResponse } from '../http/types';
+import { listsApi } from '../sharepoint/paths';
 
 export interface Library {
   title: string;
@@ -18,9 +19,9 @@ type Reader = Pick<SharepointClient, 'getJson'>;
 /** BaseTemplate 101 is the document-library template. */
 const FILTER = 'BaseTemplate eq 101 and Hidden eq false';
 
-export async function runLibraries(client: Reader): Promise<LibrariesResult> {
+export async function runLibraries(client: Reader, site?: string): Promise<LibrariesResult> {
   const url =
-    `/_api/web/lists?$filter=${encodeURIComponent(FILTER)}` +
+    `${listsApi(site)}?$filter=${encodeURIComponent(FILTER)}` +
     `&$select=${encodeURIComponent('Title,Id,RootFolder/ServerRelativeUrl')}` +
     `&$expand=RootFolder`;
   const body = await client.getJson<SpListsResponse>(url);

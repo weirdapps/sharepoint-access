@@ -28,6 +28,7 @@ const VERSION = '0.1.0';
 
 interface GlobalOpts {
   host?: string;
+  site?: string;
   timeout?: string;
   loginTimeout?: string;
   sessionFile?: string;
@@ -40,6 +41,10 @@ export function parseIntOption(raw: string, flag: string): number {
     throw new CliError('CONFIG_INVALID', `${flag} must be a positive integer, got "${raw}"`);
   }
   return n;
+}
+
+function siteFrom(program: Command): string | undefined {
+  return program.opts<GlobalOpts>().site;
 }
 
 function configFrom(program: Command): CliConfig {
@@ -69,7 +74,7 @@ async function clientFrom(config: CliConfig): Promise<SharepointClient> {
     { httpTimeoutMs: config.httpTimeoutMs },
   );
   const digest = new DigestCache(client);
-  client.setDigestProvider((force) => digest.get(force));
+  client.setDigestProvider((web, force) => digest.get(web, force));
   return client;
 }
 
@@ -103,6 +108,10 @@ export function buildProgram(): Command {
     .option('--timeout <ms>', 'per-request HTTP timeout')
     .option('--login-timeout <ms>', 'max wait for interactive sign-in')
     .option('--session-file <path>', 'override the session file path')
+    .option(
+      '--site <path>',
+      'explicit web/sub-site path, e.g. /sites/foo. Derived from the target path when omitted; needed only for webs nested deeper than two segments',
+    )
     .option('--chrome-channel <name>', 'Playwright Chrome channel');
 
   program
@@ -118,18 +127,24 @@ export function buildProgram(): Command {
   program
     .command('auth-check')
     .description('Probe the read, write and search surfaces')
-    .action(() => run(async () => runAuthCheck(await clientFrom(configFrom(program)))));
+    .action(() =>
+      run(async () => runAuthCheck(await clientFrom(configFrom(program)), siteFrom(program) ?? '')),
+    );
 
   program
     .command('health-check')
     .description('Same probes as auth-check, with timings, for cron')
-    .action(() => run(async () => runAuthCheck(await clientFrom(configFrom(program)))));
+    .action(() =>
+      run(async () => runAuthCheck(await clientFrom(configFrom(program)), siteFrom(program) ?? '')),
+    );
 
   program
     .command('ls')
     .description('List a folder')
     .argument('<path>', 'server-relative path')
-    .action((path: string) => run(async () => runLs(await clientFrom(configFrom(program)), path)));
+    .action((path: string) =>
+      run(async () => runLs(await clientFrom(configFrom(program)), path, siteFrom(program))),
+    );
 
   program
     .command('get')
@@ -137,13 +152,17 @@ export function buildProgram(): Command {
     .argument('<path-or-url>')
     .option('--out <file>', 'write the bytes to this file')
     .action((pathOrUrl: string, opts: { out?: string }) =>
-      run(async () => runGet(await clientFrom(configFrom(program)), pathOrUrl, opts.out)),
+      run(async () =>
+        runGet(await clientFrom(configFrom(program)), pathOrUrl, opts.out, siteFrom(program)),
+      ),
     );
 
   program
     .command('libraries')
     .description('List document libraries in the site')
-    .action(() => run(async () => runLibraries(await clientFrom(configFrom(program)))));
+    .action(() =>
+      run(async () => runLibraries(await clientFrom(configFrom(program)), siteFrom(program))),
+    );
 
   program
     .command('search')
@@ -165,7 +184,7 @@ export function buildProgram(): Command {
     .description('Create one folder; parents must already exist')
     .argument('<path>')
     .action((path: string) =>
-      run(async () => runMkdir(await clientFrom(configFrom(program)), path)),
+      run(async () => runMkdir(await clientFrom(configFrom(program)), path, siteFrom(program))),
     );
 
   program
@@ -176,7 +195,13 @@ export function buildProgram(): Command {
     .option('--overwrite', 'replace an existing file of the same name', false)
     .action((local: string, remoteFolder: string, opts: { overwrite: boolean }) =>
       run(async () =>
-        runPut(await clientFrom(configFrom(program)), local, remoteFolder, opts.overwrite),
+        runPut(
+          await clientFrom(configFrom(program)),
+          local,
+          remoteFolder,
+          opts.overwrite,
+          siteFrom(program),
+        ),
       ),
     );
 

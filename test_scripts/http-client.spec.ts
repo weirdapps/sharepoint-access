@@ -64,8 +64,9 @@ describe('SharepointClient', () => {
 
     expect(res.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(digest).toHaveBeenNthCalledWith(1, false);
-    expect(digest).toHaveBeenNthCalledWith(2, true);
+    // (web, force): the write targets the root web here.
+    expect(digest).toHaveBeenNthCalledWith(1, '', false);
+    expect(digest).toHaveBeenNthCalledWith(2, '', true);
     expect(headersOf(1)['X-RequestDigest']).toBe('D2');
   });
 
@@ -77,6 +78,15 @@ describe('SharepointClient', () => {
     c.setDigestProvider(vi.fn().mockResolvedValue('D'));
     await expect(c.postJson('/_api/web/x')).rejects.toThrowError(SharepointHttpError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks for a digest scoped to the sub-site web the write targets', async () => {
+    fetchMock.mockResolvedValue(ok({}));
+    const digest = vi.fn().mockResolvedValue('D');
+    const c = new SharepointClient(session, { httpTimeoutMs: 1000 });
+    c.setDigestProvider(digest);
+    await c.postJson('/personal/u/_api/web/folders/addUsingPath');
+    expect(digest).toHaveBeenCalledWith('/personal/u', false);
   });
 
   it('does not retry a plain 403 access denial', async () => {

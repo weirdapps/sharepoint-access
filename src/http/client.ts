@@ -16,7 +16,18 @@ export interface ClientOpts {
   httpTimeoutMs: number;
 }
 
-export type DigestProvider = (force: boolean) => Promise<string>;
+/** Digests are web-scoped, so the provider is asked for a specific web. */
+export type DigestProvider = (web: string, force: boolean) => Promise<string>;
+
+/**
+ * The web a request targets, i.e. everything before "/_api/".
+ * "/personal/u/_api/web/folders/..." -> "/personal/u"
+ * "/_api/web/lists"                  -> ""
+ */
+export function webOfPath(path: string): string {
+  const i = path.indexOf('/_api/');
+  return i <= 0 ? '' : path.slice(0, i);
+}
 
 export interface BinaryResult {
   bytes: Buffer;
@@ -142,9 +153,13 @@ export class SharepointClient {
     extra: Record<string, string>,
     accept: string,
   ): Promise<Response> {
+    // The digest must come from the SAME web the write targets: one minted at
+    // the host root is rejected 403 by a sub-site web, with the stale-digest
+    // marker, which reads like expiry rather than mis-scoping.
+    const web = webOfPath(path);
     const send = async (force: boolean): Promise<Response> => {
       const headers = { ...extra };
-      if (this.digestProvider) headers['X-RequestDigest'] = await this.digestProvider(force);
+      if (this.digestProvider) headers['X-RequestDigest'] = await this.digestProvider(web, force);
       return this.raw('POST', path, accept, body, headers);
     };
 
@@ -169,10 +184,11 @@ export class SharepointClient {
    * distinct method rather than a flag, so the cycle cannot be reintroduced by
    * passing the wrong argument.
    */
-  async contextInfo<T>(): Promise<T> {
-    const resp = await this.raw('POST', '/_api/contextinfo', 'application/json;odata=nometadata');
+  async contextInfo<T>(web = ''): Promise<T> {
+    const path = `${web}/_api/contextinfo`;
+    const resp = await this.raw('POST', path, 'application/json;odata=nometadata');
     if (!resp.ok) {
-      throw new SharepointHttpError(resp.status, this.url('/_api/contextinfo'), await resp.text());
+      throw new SharepointHttpError(resp.status, this.url(path), await resp.text());
     }
     const text = await resp.text();
     return (text.length > 0 ? JSON.parse(text) : {}) as T;
