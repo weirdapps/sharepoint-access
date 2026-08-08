@@ -178,6 +178,12 @@ export class SharepointClient {
     for (let attempt = 0; attempt <= NETWORK_RETRIES; attempt++) {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), this.opts.httpTimeoutMs);
+      // Capture what THIS attempt used. Concurrent requests share the client,
+      // so a sibling can clear the dispatcher between here and the catch;
+      // testing `this.dispatcher` there would make every sibling skip its own
+      // retry and fail. auth-check runs three probes in parallel and hit
+      // exactly that.
+      const usedDispatcher = this.dispatcher !== undefined;
       try {
         return await fetch(url, {
           method,
@@ -201,7 +207,7 @@ export class SharepointClient {
         // Drop the dispatcher for the rest of the process and retry: a longer
         // connect timeout is an optimisation, never a requirement, and the
         // alternative is a CLI that simply does not run on the VPS.
-        if (errorCodeOf(err) === 'UND_ERR_INVALID_ARG' && this.dispatcher !== undefined) {
+        if (errorCodeOf(err) === 'UND_ERR_INVALID_ARG' && usedDispatcher) {
           this.dispatcher = undefined;
           attempt--; // this attempt never reached the network
           continue;

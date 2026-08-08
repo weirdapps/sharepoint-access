@@ -128,3 +128,47 @@ describe('client wired to digest cache', () => {
     expect(write?.detail).not.toMatch(/call stack/i);
   });
 });
+
+describe('undici dispatcher incompatibility', () => {
+  // Node 24 on the VPS rejects the standalone undici Agent with
+  // UND_ERR_INVALID_ARG before any bytes leave the process, while Node 26 on
+  // the Mac accepts it. The client must degrade, not die.
+  const invalidArg = () =>
+    Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('invalid onRequestStart method'), {
+        code: 'UND_ERR_INVALID_ARG',
+      }),
+    });
+
+  it('drops the dispatcher and succeeds on retry', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => Promise.reject(invalidArg()))
+      .mockImplementation(() => Promise.resolve(new Response('{"Title":"T"}', { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const c = new SharepointClient(session, { httpTimeoutMs: 5000 });
+    await expect(c.getJson('/_api/web')).resolves.toBeDefined();
+    // Second call carried no dispatcher.
+    expect(fetchMock.mock.calls[1][1].dispatcher).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
+  it('lets every concurrent request retry, not just the first', async () => {
+    // The real regression: three parallel probes shared one client, the first
+    // cleared the dispatcher, and the other two then skipped their own retry.
+    let failuresLeft = 3;
+    const fetchMock = vi.fn().mockImplementation((_u: string, init: { dispatcher?: unknown }) => {
+      if (init?.dispatcher && failuresLeft-- > 0) return Promise.reject(invalidArg());
+      return Promise.resolve(new Response('{"ok":true}', { status: 200 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const c = new SharepointClient(session, { httpTimeoutMs: 5000 });
+    const results = await Promise.all([
+      c.getJson('/_api/web'),
+      c.getJson('/_api/web/lists'),
+      c.getJson('/_api/search/query'),
+    ]);
+    expect(results).toHaveLength(3);
+    vi.unstubAllGlobals();
+  });
+});
