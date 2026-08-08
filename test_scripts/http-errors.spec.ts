@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { classifyStatus, isStaleDigest, SharepointHttpError } from '../src/http/errors';
+import { describeFetchError, isRetryableNetworkError } from '../src/http/client';
 
 const STALE =
   '{"error":{"message":"The security validation for this page is invalid and might be corrupted."}}';
@@ -64,5 +65,38 @@ describe('SharepointHttpError', () => {
 
   it('is instanceof Error for catch-site checks', () => {
     expect(new SharepointHttpError(500, 'u', '')).toBeInstanceOf(Error);
+  });
+});
+
+describe('network error diagnosis', () => {
+  // Node's fetch throws TypeError("fetch failed") and buries the reason on
+  // .cause. That cost real debugging time when a SharePoint front-end started
+  // taking longer to connect than undici's fixed 10s default allowed.
+  const connectTimeout = Object.assign(new TypeError('fetch failed'), {
+    cause: Object.assign(new Error('Connect Timeout Error'), {
+      code: 'UND_ERR_CONNECT_TIMEOUT',
+    }),
+  });
+
+  it('unwraps the cause instead of reporting a bare "fetch failed"', () => {
+    const msg = describeFetchError(connectTimeout);
+    expect(msg).toContain('Connect Timeout Error');
+    expect(msg).toContain('UND_ERR_CONNECT_TIMEOUT');
+  });
+
+  it('handles an error with no cause', () => {
+    expect(describeFetchError(new Error('plain'))).toBe('plain');
+  });
+
+  it('treats connection-level failures as retryable', () => {
+    expect(isRetryableNetworkError(connectTimeout)).toBe(true);
+    expect(isRetryableNetworkError({ code: 'ECONNRESET' })).toBe(true);
+  });
+
+  it('does not treat an application error as retryable', () => {
+    // Once the server has answered, the status is the answer: retrying a 403
+    // would just repeat it.
+    expect(isRetryableNetworkError(new Error('boom'))).toBe(false);
+    expect(isRetryableNetworkError({ code: 'ERR_SOMETHING_ELSE' })).toBe(false);
   });
 });

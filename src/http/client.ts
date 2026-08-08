@@ -8,13 +8,28 @@
 //      exfiltrate the session to an arbitrary host.
 //   2. Error text never interpolates the session. Callers log messages.
 
+import { Agent } from 'undici';
+
 import type { SharepointSession } from '../session/schema';
 import { CliError } from '../config/errors';
 import { SharepointHttpError, isStaleDigest } from './errors';
 
 export interface ClientOpts {
   httpTimeoutMs: number;
+  /** TCP connect ceiling. Separate from the overall request timeout. */
+  connectTimeoutMs?: number;
 }
+
+/**
+ * undici's DEFAULT CONNECT TIMEOUT IS 10s AND IS NOT CONFIGURABLE WITHOUT A
+ * DISPATCHER. Measured against the tenant on 2026-08-08: some SharePoint
+ * front-ends take anywhere from 1.5s to 42s just to complete the TCP connect,
+ * so with the default roughly two requests in three died with
+ * UND_ERR_CONNECT_TIMEOUT while the identical request from Python succeeded.
+ * A dispatcher with a generous connect timeout is the fix; the retry below
+ * only covers the residue.
+ */
+const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 
 /** Digests are web-scoped, so the provider is asked for a specific web. */
 export type DigestProvider = (web: string, force: boolean) => Promise<string>;
@@ -33,6 +48,46 @@ export interface BinaryResult {
   bytes: Buffer;
   contentType: string;
   filename?: string;
+}
+
+/** Extra attempts after the first, for connection-level failures only. */
+const NETWORK_RETRIES = 2;
+
+/** undici error codes that mean "never reached the server", so a retry is safe. */
+const RETRYABLE_CODES = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'EPIPE',
+]);
+
+function errorCodeOf(err: unknown): string | undefined {
+  const cause = (err as { cause?: unknown })?.cause;
+  return (
+    (err as { code?: string })?.code ?? (cause as { code?: string } | undefined)?.code ?? undefined
+  );
+}
+
+export function isRetryableNetworkError(err: unknown): boolean {
+  const code = errorCodeOf(err);
+  return code !== undefined && RETRYABLE_CODES.has(code);
+}
+
+/**
+ * Node's fetch throws a bare TypeError("fetch failed") and hides the real
+ * reason on `.cause`. Unwrap it so operators see a diagnosable message.
+ */
+export function describeFetchError(err: unknown): string {
+  const msg = (err as Error)?.message ?? String(err);
+  const cause = (err as { cause?: unknown })?.cause;
+  if (!cause) return msg;
+  const causeMsg = (cause as Error)?.message ?? String(cause);
+  const code = errorCodeOf(err);
+  return code ? `${msg}: ${causeMsg} (${code})` : `${msg}: ${causeMsg}`;
 }
 
 /** Only https *.sharepoint.com absolute URLs may receive the session cookies. */
@@ -60,10 +115,16 @@ export function assertSharepointUrl(raw: string): URL {
 export class SharepointClient {
   private digestProvider: DigestProvider | null = null;
 
+  private readonly dispatcher: Agent;
+
   constructor(
     private readonly session: SharepointSession,
     private readonly opts: ClientOpts,
-  ) {}
+  ) {
+    this.dispatcher = new Agent({
+      connect: { timeout: opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS },
+    });
+  }
 
   setDigestProvider(fn: DigestProvider): void {
     this.digestProvider = fn;
@@ -101,27 +162,45 @@ export class SharepointClient {
     extra?: Record<string, string>,
   ): Promise<Response> {
     const url = this.url(pathOrUrl);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.opts.httpTimeoutMs);
-    try {
-      return await fetch(url, {
-        method,
-        headers: { ...this.baseHeaders(accept), ...(extra ?? {}) },
-        body,
-        signal: ctrl.signal,
-        redirect: 'follow',
-      });
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        throw new CliError(
-          'TIMEOUT',
-          `request timed out after ${this.opts.httpTimeoutMs}ms: ${url}`,
-        );
+    let lastErr: unknown;
+
+    // Retry transient CONNECTION failures only. Measured against the tenant on
+    // 2026-08-08: some SharePoint front-ends take ~10s to complete a TCP
+    // connect, right at undici's fixed 10s connect timeout, so identical
+    // requests fail roughly two times in three and then succeed. undici's
+    // connect timeout is not adjustable without supplying a dispatcher, and a
+    // bounded retry is the smaller change. Only pre-response errors are
+    // retried: once the server has answered, the status is the answer.
+    for (let attempt = 0; attempt <= NETWORK_RETRIES; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), this.opts.httpTimeoutMs);
+      try {
+        return await fetch(url, {
+          method,
+          headers: { ...this.baseHeaders(accept), ...(extra ?? {}) },
+          body,
+          signal: ctrl.signal,
+          redirect: 'follow',
+          dispatcher: this.dispatcher,
+        } as RequestInit & { dispatcher: Agent });
+      } catch (err) {
+        lastErr = err;
+        if ((err as Error).name === 'AbortError') {
+          throw new CliError(
+            'TIMEOUT',
+            `request timed out after ${this.opts.httpTimeoutMs}ms: ${url}`,
+          );
+        }
+        // A body cannot be replayed once consumed, so never retry those.
+        if (!isRetryableNetworkError(err) || body !== undefined) break;
+      } finally {
+        clearTimeout(timer);
       }
-      throw new CliError('UPSTREAM', `request failed: ${(err as Error).message}`);
-    } finally {
-      clearTimeout(timer);
     }
+
+    // Surface the underlying cause. Bare "fetch failed" is undiagnosable, and
+    // cost real time when this endpoint first misbehaved.
+    throw new CliError('UPSTREAM', `request failed: ${describeFetchError(lastErr)}`);
   }
 
   async getJson<T>(path: string): Promise<T> {

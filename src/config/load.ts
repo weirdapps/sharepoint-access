@@ -33,7 +33,10 @@ export interface ConfigOverrides {
 
 /** Defaults for the four plumbing settings. See the exception in CLAUDE.md. */
 const DEFAULTS = {
-  httpTimeoutMs: 30_000,
+  // 60s, not 30s: measured connects to some SharePoint front-ends reach
+  // 42s on this tenant, and the overall abort must not fire inside a
+  // connect that is still progressing.
+  httpTimeoutMs: 60_000,
   loginTimeoutMs: 300_000,
   renewTimeoutMs: 30_000,
   chromeChannel: 'chrome',

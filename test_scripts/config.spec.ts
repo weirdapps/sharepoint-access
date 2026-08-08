@@ -55,7 +55,7 @@ describe('loadConfig', () => {
 
   it('applies documented defaults for the four plumbing settings', () => {
     const c = loadConfig({ host: 'x.sharepoint.com' }, {});
-    expect(c.httpTimeoutMs).toBe(30000);
+    expect(c.httpTimeoutMs).toBe(60000);
     expect(c.loginTimeoutMs).toBe(300000);
     expect(c.renewTimeoutMs).toBe(30000);
     expect(c.chromeChannel).toBe('chrome');
