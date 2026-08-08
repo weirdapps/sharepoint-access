@@ -150,3 +150,19 @@ must be removed once phase 3 lands.
 
 No tools implemented yet. Document each one here in the required format as it
 lands.
+
+## Project-specific exceptions to global rules
+
+### Exception: defaults allowed for four runtime-plumbing settings
+
+`httpTimeoutMs` (30000), `loginTimeoutMs` (300000), `renewTimeoutMs` (30000)
+and `chromeChannel` ("chrome") have defaults, mirroring the identical exception
+recorded in `outlook-access`. They are operational plumbing, not secrets or
+environment-distinguishing identities, so requiring them on every invocation
+trades ergonomics for safety the rule does not protect.
+
+`host` is explicitly **not** covered. It identifies which tenant is addressed,
+so it has no default and `loadConfig` raises `CONFIG_MISSING` when absent. A
+default here would silently point at the wrong tenant.
+
+Precedence: CLI flag > env var (`SHAREPOINT_CLI_*`) > default.
