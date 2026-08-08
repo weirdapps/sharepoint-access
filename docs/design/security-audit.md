@@ -125,3 +125,63 @@ graph the CLI actually builds was never exercised.
 `test_scripts/integration.spec.ts` now wires the real client to the real digest
 cache and mocks only `fetch`. Any future component that participates in the
 request path should get a test at that layer, not only at its own boundary.
+
+---
+
+## Round 2: 2026-08-08, after live and cross-machine testing
+
+The first pass audited code. This pass audited the running system, and found
+things static review could not.
+
+### Fixed
+
+**Sub-site scoping (correctness, high).** Every `_api` call ran against the
+host root web. SharePoint answers `200` with EMPTY collections for a path the
+queried web does not own, and for a path that does not exist at all, so the CLI
+reported real folders as empty and typos as empty rather than erroring.
+Everything under `/sites/*` and `/personal/*` was silently unreachable. Fixed by
+deriving the web from the path, requesting `Exists`, and adding `--site`.
+
+**Web-scoped digests (correctness, high).** `X-RequestDigest` is per-web. A
+root-minted digest is rejected `403` by a sub-site _carrying the stale-digest
+marker_, so it presented as expiry and the retry could never succeed. Every
+write outside the root web was broken. `DigestCache` is now keyed by web.
+
+**Prototype pollution via search keys** and **relative paths able to retarget
+the request host** were fixed in round 1 and remain covered by
+`security.spec.ts`.
+
+### Availability findings
+
+**undici connect timeout.** Fixed at 10s without a dispatcher. Measured
+connects to some front-ends on this tenant range from 1.5s to 42s, so roughly
+two requests in three failed. Fixed with an Agent, a 60s overall timeout, and a
+bounded retry for connection-level failures only.
+
+**Cross-version dispatcher incompatibility.** Node 24 on the VPS rejects a
+standalone undici Agent that Node 26 on the Mac accepts, failing every request
+instantly. The client now drops the dispatcher and retries. Caught only by
+running `auth-check` on the VPS; the Mac was green throughout.
+
+**A race in that fix.** Concurrent requests share one client, so the first to
+fail cleared the dispatcher and the rest then skipped their own retry.
+`auth-check` runs three probes in parallel and reproduced it exactly. Each
+attempt now records whether it used a dispatcher.
+
+### Operational findings, from an adversarial audit of 60 automations
+
+**A transitional mirror that would have destroyed the thing it was preparing
+for.** The session mirror was unconditional, so the moment `sharepoint-cli
+login` created a real session, the 15-minute job would have overwritten it with
+the older `outlook-cli` copy, forever. Now guarded on the profile's existence,
+so the block retires itself.
+
+**Silent push failure.** `scp` does not create a missing parent, and every
+other `scp` in that script is `2>/dev/null` with no return-code check, so a
+push to a non-existent remote directory would have failed silently every 15
+minutes. The directory is now ensured and failures are logged.
+
+**Search coverage.** BSD `grep -r` silently skips symlinked files, and
+`~/Documents`, `~/Operational` and much of `~/.local/bin` are symlinks. That is
+how an earlier hand search missed the live token-sync script. Use
+`find -L <dir> -type f -print0 | xargs -0 grep`.

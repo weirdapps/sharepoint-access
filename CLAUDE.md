@@ -77,9 +77,8 @@ reason recorded here:
 Each has its own Playwright profile and its own login. They share no session,
 no profile, and no lock. Do not introduce cross-repo filesystem coupling.
 
-**Status: scaffold.** Only `src/cli.ts` and `src/util/exit-codes.ts` exist.
-Every command exits `7 not_implemented`. Build order is in
-`docs/design/project-design.md` §11.
+**Status: in production since 2026-08-08.** All ten commands implemented,
+255 tests, verified live on both hosts from the Mac and the VPS.
 
 ## Hard constraints
 
@@ -99,6 +98,20 @@ assumptions that contradict them without re-probing first.
 - Use `*ByServerRelativePath(decodedUrl=...)`, never `*ByServerRelativeUrl(...)`.
   The `Url` variants mishandle `#` and `%`, and tenant filenames are routinely
   Greek.
+- **Every `_api` call and every digest is WEB-scoped.** The host root answers
+  200 with EMPTY collections for a path it does not own, and even for a path
+  that does not exist, so a mis-scoped call reads as a confidently empty folder
+  rather than an error. A digest minted at the root is rejected 403 by a
+  sub-site _carrying the stale-digest marker_, which reads like expiry. Both are
+  derived from the path automatically; `--site` overrides.
+- **`contextInfo()` must never route through `post()`.** `post()` asks the
+  digest provider for a header and the provider's only source is `contextInfo`,
+  so routing it through recurses until the stack blows. The types make the cycle
+  unrepresentable; keep it that way.
+- **undici's connect timeout is 10s and needs a dispatcher to change.** Some
+  front-ends here take 1.5s to 42s just to connect. The dispatcher is passed
+  when accepted and silently dropped on `UND_ERR_INVALID_ARG`, because Node 24
+  on the VPS rejects a standalone undici Agent that Node 26 on the Mac accepts.
 
 ## Tech stack
 

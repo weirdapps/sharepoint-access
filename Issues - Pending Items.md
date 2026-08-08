@@ -4,38 +4,30 @@ Pending items first, most critical at the top. Completed items below.
 
 ## Pending
 
-### P3: atm-recon must be migrated before anything is removed
+### P9: Strip SharePoint from outlook-access (F-501), after one clean cycle
 
-`atm-recon/scripts/sharepoint_download.py` reads
-`~/.outlook-cli/sharepoint-session.json` **directly**, rather than shelling out
-to `outlook-cli`, so it breaks the instant the session file moves. Its
-`CLAUDE.md` and `README.md` document the same path and login command.
+Everything this was gated on is done. Held back deliberately: the session
+producer changed from `outlook-cli auth-renew --sharepoint-host` to
+`sharepoint-cli auth-renew` at 22:30 on 2026-08-08, and both run in parallel
+right now. Removing the fallback before the new producer has completed an
+unattended cycle is the one remaining move that could cause an outage, and it
+would only surface five days later when the rolling window lapsed.
 
-It also authenticates against the `-my` ODfB host, which is why OneDrive for
-Business is in scope (`project-design.md` §2.2) despite an earlier revision
-listing it as a non-goal.
+Green-light checks:
 
-Recorded as F-500 and gating the rest of phase 5.
+1. `~/.sharepoint-cli/session.json` `tokenExpiresAt` has rolled forward on its
+   own, with no `sharepoint-cli auth-renew FAILED` in
+   `~/Library/Logs/token-sync-vps.log`.
+2. The 02:00 `sb-attachments` run on the VPS shows SharePoint fetches
+   succeeding rather than `fetched: 0`.
+3. `sharepoint-cli auth-check` returns `ok` on both hosts, from both machines.
 
-**Process note:** the search that originally concluded "no consumers" omitted
-the `sharepoint-session` term and returned a false negative. Search all three
-terms (`sharepoint-host`, `download-sharepoint-link`, `sharepoint-session`)
-before declaring any repo clean.
-
-### P8: Live write path is unproven
-
-`mkdir` and `put` have complete unit coverage and the write capability is proven
-(the auth-check write probe mints a digest on both hosts), but no file has been
-created in a live library. Needs an operator-nominated scratch folder, ideally
-in the `-my` OneDrive rather than a shared team library.
-
-### P4: Cold-profile login is unproven
-
-The capture code being ported from `outlook-access` assumes a **warm** context
-whose Microsoft SSO cookies were just established by an Outlook sign-in, so it
-navigates and expects silent completion. Standalone, the first `login` meets the
-full interactive redirect chain including MFA. This is the single largest
-unknown in the design and is why phase 1 exists on its own.
+Then: drop the `--sharepoint-host` half of `sync-tokens-to-vps.sh` line 59,
+change `~/.claude/hooks/outlook-reauth.sh:25` to a bare `outlook-cli login`
+and delete its `SHAREPOINT_HOST` line, and remove `sharepoint-capture.ts`,
+`sharepoint-client.ts`, `sharepoint-schema.ts`, `download-sharepoint-link` and
+the `--sharepoint-host` flag from `outlook-access`. Rebuild and reinstall
+outlook-cli on **both** machines, or the removal is not actually live.
 
 ### P7: Whole-file buffering caps practical file size
 
@@ -45,6 +37,25 @@ bounds the request size but not memory: a multi-gigabyte file exhausts the heap.
 Streaming both directions is the fix. See `docs/design/security-audit.md` L1.
 
 ## Completed
+
+### P3: atm-recon migrated (resolved 2026-08-08)
+
+Ported to `sharepoint-cli` and verified: 189 files downloaded, xlsx validated
+as real workbooks. It had in fact been broken beforehand with
+`KeyError: 'bearer'`, so this was a repair as well as a port.
+
+### P4: cold-profile login (resolved 2026-08-08, and the premise was wrong)
+
+No interactive MFA was needed. `auth-renew` succeeded headlessly from a cold
+profile and the resulting profile holds `ESTSAUTHPERSISTENT` valid to
+2026-11-06. `sharepoint-cli` renews itself; it is no longer downstream of
+`outlook-cli`.
+
+### P8: live write path (resolved 2026-08-08)
+
+Proven in a scratch folder in the personal OneDrive, then recycled: mkdir, put
+with a Greek plus apostrophe filename, ls, get with byte-identical round-trip,
+overwrite, and a 12 MB chunked upload also byte-identical.
 
 ### P1: Config no-fallback exception (resolved 2026-08-08)
 

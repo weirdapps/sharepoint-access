@@ -6,9 +6,10 @@ Third member of the set alongside [`outlook-access`](https://github.com/weirdapp
 (`teams-cli`), following the same one-surface-per-repo pattern: its own CLI, its
 own `~/.sharepoint-cli/` directory, its own Playwright profile, its own login.
 
-> **Status: scaffold.** Tooling, CI, and the design are in place. No command is
-> implemented yet. Every command below exits `7 not_implemented` until its phase
-> lands. See [`docs/design/project-design.md`](docs/design/project-design.md).
+> **Status: in production since 2026-08-08.** All ten commands are implemented,
+> 255 tests pass, and the read and write surfaces are verified against a live
+> tenant on both the team-sites and OneDrive-for-Business hosts, from the Mac
+> and from the VPS. See [`docs/design/project-design.md`](docs/design/project-design.md).
 
 ## Why a browser-captured session
 
@@ -33,18 +34,45 @@ table is in the design doc.
 
 ## Commands
 
-| Command        | Phase | Purpose                                          |
-| -------------- | ----- | ------------------------------------------------ |
-| `login`        | 1     | Interactive sign-in, capture and persist session |
-| `auth-renew`   | 1     | Headless silent re-capture                       |
-| `auth-check`   | 1     | Probe read, write and search surfaces            |
-| `health-check` | 1     | Same probes with timings, for cron               |
-| `ls`           | 2     | List a folder                                    |
-| `get`          | 2     | Download a file by path or URL                   |
-| `search`       | 2     | Search files and sites                           |
-| `libraries`    | 2     | List document libraries in a site                |
-| `mkdir`        | 3     | Create a folder                                  |
-| `put`          | 3     | Upload a file, auto-chunked above 10 MB          |
+| Command        | Purpose                                                        |
+| -------------- | -------------------------------------------------------------- |
+| `login`        | Interactive sign-in, capture and persist the session           |
+| `auth-renew`   | Headless silent re-capture via `ESTSAUTHPERSISTENT` (~90 days) |
+| `auth-check`   | Probe the read, write and search surfaces                      |
+| `health-check` | Same probes with timings, for cron                             |
+| `ls`           | List a folder                                                  |
+| `get`          | Download a file by server-relative path or absolute URL        |
+| `search`       | Search files and sites                                         |
+| `libraries`    | List document libraries in a site                              |
+| `mkdir`        | Create one folder (parents must exist)                         |
+| `put`          | Upload a file, auto-chunked above 10 MB                        |
+
+```bash
+CLI="node ~/SourceCode/sharepoint-access/dist/cli.js"
+
+# Team sites
+$CLI --host contoso.sharepoint.com ls "/sites/finance/Shared Documents"
+
+# OneDrive for Business needs the -my host. One session covers both.
+$CLI --host contoso-my.sharepoint.com ls "/personal/jane_doe_contoso_com/Documents"
+
+$CLI --host contoso.sharepoint.com get "/sites/finance/Shared Documents/q3.xlsx" --out ./q3.xlsx
+$CLI --host contoso.sharepoint.com put ./report.docx "/sites/finance/Shared Documents"
+$CLI --host contoso.sharepoint.com search "contentclass:STS_Site" --rows 5
+```
+
+### Three things that will bite you
+
+**`--host` selects the wrong content silently if you get it wrong.** Anything
+under `/personal/...` lives on `<tenant>-my.sharepoint.com`.
+
+**Paths are server-relative**, not URLs. Sub-site scoping is derived from the
+path automatically; only a web nested deeper than two segments needs `--site`.
+
+**An unexpected empty listing used to mean "wrong web".** SharePoint answers
+`200` with empty collections for a path the queried web does not own, and even
+for a path that does not exist. The CLI now requests `Exists` and raises
+`not_found`, but stay suspicious of a surprising empty result.
 
 ## Build / Run
 
