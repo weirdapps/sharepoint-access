@@ -25,13 +25,14 @@ design: `GET /_api/web` for reads, `POST /_api/contextinfo` for writes,
 
 ## Phase 2: Read surface
 
-| ID    | Function           | State   | Description                                                                                                        |
-| ----- | ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------ |
-| F-201 | `ls <path>`        | planned | List a folder's subfolders and files with size and modified time                                                   |
-| F-202 | `get <path\|url>`  | planned | Download a file by server-relative path or absolute URL. Replaces `outlook-cli download-sharepoint-link`           |
-| F-203 | `search <query>`   | planned | Search files and sites. Site discovery is `search "contentclass:STS_Site"`, there is no `sites` command            |
-| F-204 | `libraries [site]` | planned | List non-hidden document libraries (`BaseTemplate eq 101`) in a site                                               |
-| F-205 | Path handling      | planned | OData apostrophe doubling, UTF-8 percent-encoding, encode-layer separation, traversal rejection, parent/leaf split |
+| ID    | Function           | State   | Description                                                                                                                                                            |
+| ----- | ------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-201 | `ls <path>`        | planned | List a folder's subfolders and files with size and modified time                                                                                                       |
+| F-202 | `get <path\|url>`  | planned | Download a file by server-relative path or absolute URL. Replaces `outlook-cli download-sharepoint-link`                                                               |
+| F-203 | `search <query>`   | planned | Search files and sites. Site discovery is `search "contentclass:STS_Site"`, there is no `sites` command                                                                |
+| F-204 | `libraries [site]` | planned | List non-hidden document libraries (`BaseTemplate eq 101`) in a site                                                                                                   |
+| F-205 | Path handling      | planned | OData apostrophe doubling, UTF-8 percent-encoding, encode-layer separation, traversal rejection, parent/leaf split                                                     |
+| F-206 | Dual-host support  | planned | `--host` accepts the team-sites host or the `-my` ODfB host. One session covers both, so no separate code path, but both must be smoke tested. Required by `atm-recon` |
 
 ## Phase 3: Write surface
 
@@ -53,13 +54,14 @@ Tools exposed: `sharepoint_list`, `sharepoint_get`, `sharepoint_put`,
 
 ## Phase 5: Removal from outlook-access
 
-| ID    | Function            | State   | Description                                                                                                                                              |
-| ----- | ------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F-501 | Strip SharePoint    | planned | Remove `--sharepoint-host`, `download-sharepoint-link`, `sharepoint-capture.ts`, `sharepoint-client.ts`, `sharepoint-schema.ts` and their tests and docs |
-| F-502 | Update re-auth docs | planned | Global `CLAUDE.md` re-auth line points at `sharepoint-cli login`                                                                                         |
-| F-503 | Session migration   | planned | `~/.outlook-cli/sharepoint-session.json` to `~/.sharepoint-cli/session.json`, or simply re-run `login`                                                   |
+| ID    | Function            | State   | Description                                                                                                                                                                      |
+| ----- | ------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-500 | Migrate `atm-recon` | planned | Port `scripts/sharepoint_download.py` to the new session path, update its `CLAUDE.md` and `README.md`, verify it still pulls its three folders. **Gate for the rest of phase 5** |
+| F-501 | Strip SharePoint    | planned | Remove `--sharepoint-host`, `download-sharepoint-link`, `sharepoint-capture.ts`, `sharepoint-client.ts`, `sharepoint-schema.ts` and their tests and docs                         |
+| F-502 | Update re-auth docs | planned | Global `CLAUDE.md` and `plessas-trading-stack` newsfeed `SKILL.md` re-auth lines point at `sharepoint-cli login`                                                                 |
+| F-503 | Session migration   | planned | `~/.outlook-cli/sharepoint-session.json` to `~/.sharepoint-cli/session.json`, or simply re-run `login`                                                                           |
 
-Gated on phases 1 to 3 being `verified`.
+Gated on phases 1 to 3 being `verified`, and F-500 gates F-501 to F-503.
 
 ## Cross-cutting
 

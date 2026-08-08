@@ -45,10 +45,10 @@ Three facts make now the right moment:
 
 - SharePoint is only 537 lines across 4 files in `outlook-access` today, and this
   design adds roughly 1,500 more. Extracting costs 537 lines now or 2,000 later.
-- Nothing outside `outlook-access` calls `--sharepoint-host` or
-  `download-sharepoint-link`. `plessas-marketplace`, `atm-recon`, and
-  `claude-config` were all searched. The only consumer is the re-auth line in the
-  global `CLAUDE.md`, a one-line edit.
+- The consumer set is small and known. `atm-recon` is the one real dependant
+  (see 2.1). `plessas-trading-stack` carries a single incidental re-auth
+  instruction in `plugins/trading-hub/skills/newsfeed/SKILL.md`, and the global
+  `CLAUDE.md` has one more. `plessas-marketplace` and `claude-config` are clean.
 - The pattern to copy already exists and is proven twice.
 
 The accepted cost: SharePoint SSO currently rides free on the Outlook login,
@@ -57,7 +57,39 @@ authenticated. A standalone repo needs its own profile and one interactive MFA a
 setup, then silent renewal via its own `ESTSAUTHPERSISTENT` for roughly 90 days.
 This is exactly the deal `teams-access` already makes.
 
-### 2.1 Rejected alternatives
+### 2.1 The atm-recon dependency
+
+`atm-recon` is a live consumer and phase 5 cannot proceed without migrating it:
+
+| File                                | Dependency                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------ |
+| `scripts/sharepoint_download.py:21` | Reads `~/.outlook-cli/sharepoint-session.json` directly                  |
+| `scripts/sharepoint_download.py:36` | Error text instructs `outlook-cli login --sharepoint-host <tenant>-my.…` |
+| `CLAUDE.md:111,116`                 | Documents the same login and session path                                |
+| `README.md:113,122`                 | Documents the same, plus the three folders it pulls                      |
+
+It reads the session file directly rather than shelling out to `outlook-cli`, so
+it breaks the moment the file moves to `~/.sharepoint-cli/session.json`. It is
+also the reason OneDrive for Business is in scope: see 2.2.
+
+### 2.2 OneDrive for Business is in scope
+
+`atm-recon` authenticates against `<tenant>-my.sharepoint.com`, the OneDrive for
+Business host, not the team-sites host. An earlier revision of this document
+listed ODfB as a non-goal, which would have excluded the only known production
+consumer.
+
+Probed on 2026-08-08: **one session covers both hosts.** Capture already collects
+cookies for the parent `sharepoint.com` domain, so the same `FedAuth`/`rtFa` pair
+that authorises `<tenant>.sharepoint.com` returns 200 on
+`<tenant>-my.sharepoint.com/_api/web` and `/_api/web/currentuser`. ODfB is the
+same classic REST API on a different host, not a second auth problem.
+
+Consequence: `--host` accepts either form, and the session records which host it
+was captured against. No separate code path is needed, but the live smoke test
+must cover both.
+
+### 2.3 Rejected alternatives
 
 **Reuse `~/.outlook-cli/playwright-profile` from the new repo.** Would keep SSO
 free and avoid any extra MFA, but couples two independently-versioned binaries to
@@ -85,6 +117,7 @@ Measured against the live tenant on 2026-08-08, not assumed.
 | `GET /_api/search/query`        | 200                                       | Search and site discovery are available  |
 | `GetFolderByServerRelativeUrl`  | 200                                       | Legacy accessor works                    |
 | `GetFolderByServerRelativePath` | 200                                       | Modern accessor works, and is preferred  |
+| ODfB host `GET /_api/web`       | 200 on the same cookies                   | One session covers both hosts, see 2.2   |
 
 Two conclusions follow and are not revisitable without new evidence:
 
@@ -98,11 +131,10 @@ Two conclusions follow and are not revisitable without new evidence:
 
 ## 4. Non-goals
 
-- No shared auth package across the three repos. See 2.1.
+- No shared auth package across the three repos. See 2.3.
 - No long-lived local proxy. A resident browser plus an unauthenticated
   `127.0.0.1` port fronting a document store is worse than persist-and-renew,
   which is stateless between invocations, survives reboot, and suits cron.
-- No OneDrive-for-Business personal-site support in this pass.
 - No `outlook-cli` compatibility shim. The removal in phase 5 is a clean break.
 
 ## 5. Repository layout
@@ -186,7 +218,7 @@ any fails.
 ### 7.1 `paths.ts`
 
 Isolated because it is the most error-prone part of SPO REST and because nearly
-every NBG document has a Greek filename.
+every document on this tenant has a Greek filename.
 
 - Double apostrophes inside OData string literals (`O'Brien` becomes `O''Brien`).
   A filename containing an apostrophe otherwise terminates the literal early and
@@ -298,13 +330,19 @@ Each phase is independently verifiable and leaves the tree working.
 2. **Read surface.** `ls`, `get`, `search`, `libraries`, plus `paths.ts`.
 3. **Write surface.** `digest.ts`, `upload.ts`, `mkdir`, `put`.
 4. **MCP plugin.** `plugins/files/` in `plessas-marketplace`.
-5. **Removal.** Strip `--sharepoint-host`, `download-sharepoint-link`,
-   `sharepoint-capture.ts`, `sharepoint-client.ts`, and `sharepoint-schema.ts`
-   from `outlook-access`, along with their tests and doc entries. This spec file
-   moves to `sharepoint-access` rather than being deleted, leaving a one-line
-   pointer behind in the `outlook-access` CHANGELOG. Update the global
-   `CLAUDE.md` re-auth line. Migrate `~/.outlook-cli/sharepoint-session.json` to
-   `~/.sharepoint-cli/session.json`, or simply re-run `login`.
+5. **Migration and removal**, in this order:
+   1. Port `atm-recon/scripts/sharepoint_download.py` to the new session path,
+      and update its `CLAUDE.md` and `README.md`. Verify it still pulls its three
+      folders. This is the gate: nothing else in phase 5 starts until it passes.
+   2. Fix the incidental re-auth instructions in
+      `plessas-trading-stack/plugins/trading-hub/skills/newsfeed/SKILL.md` and
+      the global `CLAUDE.md`.
+   3. Strip `--sharepoint-host`, `download-sharepoint-link`,
+      `sharepoint-capture.ts`, `sharepoint-client.ts`, and
+      `sharepoint-schema.ts` from `outlook-access`, along with their tests and
+      doc entries, leaving a one-line pointer in its CHANGELOG.
+   4. Migrate `~/.outlook-cli/sharepoint-session.json` to
+      `~/.sharepoint-cli/session.json`, or simply re-run `login`.
 
 Phase 5 runs only after phases 1 to 3 are proven against the live tenant.
 
@@ -323,7 +361,9 @@ Vitest, `fetch` mocked, specs under `test_scripts/*.spec.ts`.
 
 One live smoke script gated behind an environment variable so it never runs in
 CI. Read-only except for a single write into a scratch folder nominated by the
-operator, using a Greek-named fixture file.
+operator, using a Greek-named fixture file. It must exercise **both** the
+team-sites host and the `-my` ODfB host, since `atm-recon` depends on the
+latter.
 
 ## 13. Documentation obligations
 
@@ -338,15 +378,15 @@ copies:
 
 ## 14. Risks
 
-| Risk                                                                          | Mitigation                                                                          |
-| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Cold-profile login behaves differently from the warm path currently exercised | Phase 1 is exactly this, proven before anything is built on top                     |
-| Tenant policy restricts parts of classic REST not yet probed                  | Probe each endpoint against the live tenant before building its command             |
-| Greek filename encoding breaks in a case unit tests miss                      | Live smoke test uses a Greek-named fixture                                          |
-| Chunked upload leaves partial files on failure                                | Explicit delete of the target on any chunk error                                    |
-| Digest goes stale mid-upload on a slow link                                   | 60-second safety margin plus the retry-once re-mint                                 |
-| Phase 5 removal breaks an unknown consumer                                    | Three repos already searched and clean; removal is last and gated on 1 to 3 working |
-| Two Playwright profiles mean two ~90-day re-logins                            | Accepted, matches `teams-access`                                                    |
+| Risk                                                                          | Mitigation                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cold-profile login behaves differently from the warm path currently exercised | Phase 1 is exactly this, proven before anything is built on top                                                                                                                                                                                                                          |
+| Tenant policy restricts parts of classic REST not yet probed                  | Probe each endpoint against the live tenant before building its command                                                                                                                                                                                                                  |
+| Greek filename encoding breaks in a case unit tests miss                      | Live smoke test uses a Greek-named fixture                                                                                                                                                                                                                                               |
+| Chunked upload leaves partial files on failure                                | Explicit delete of the target on any chunk error                                                                                                                                                                                                                                         |
+| Digest goes stale mid-upload on a slow link                                   | 60-second safety margin plus the retry-once re-mint                                                                                                                                                                                                                                      |
+| Phase 5 removal breaks a consumer                                             | `atm-recon` is a known dependant and is migrated first, as the gate for the rest of phase 5. An earlier revision wrongly claimed no consumers existed: the search that produced that claim omitted the `sharepoint-session` term. Re-run all three terms before declaring anything clean |
+| Two Playwright profiles mean two ~90-day re-logins                            | Accepted, matches `teams-access`                                                                                                                                                                                                                                                         |
 
 ---
 

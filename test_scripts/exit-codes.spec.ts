@@ -23,7 +23,7 @@ describe('ExitCode', () => {
 
   it('reserves 7 for the scaffold-only NotImplemented case', () => {
     // Remove this expectation, and the enum member, once phase 3 lands.
-    // Tracked as P4 in "Issues - Pending Items.md".
+    // Tracked as P5 in "Issues - Pending Items.md".
     expect(ExitCode.NotImplemented).toBe(7);
   });
 });
