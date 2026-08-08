@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ExitCode, ExitWithCode } from '../src/util/exit-codes';
+import { CliError, exitCodeFor } from '../src/config/errors';
 
 describe('ExitCode', () => {
   it('matches the values teams-access and outlook-access use for 0-6', () => {
@@ -21,10 +22,8 @@ describe('ExitCode', () => {
     expect(ExitCode.Io).toBe(6);
   });
 
-  it('reserves 7 for the scaffold-only NotImplemented case', () => {
-    // Remove this expectation, and the enum member, once phase 3 lands.
-    // Tracked as P5 in "Issues - Pending Items.md".
-    expect(ExitCode.NotImplemented).toBe(7);
+  it('no longer carries the scaffold-only NotImplemented code', () => {
+    expect((ExitCode as Record<string, number>).NotImplemented).toBeUndefined();
   });
 });
 
@@ -40,7 +39,46 @@ describe('ExitWithCode', () => {
   });
 
   it('falls back to the payload code when no message is given', () => {
-    const err = new ExitWithCode(ExitCode.Upstream, { code: 'upstream_error' });
-    expect(err.message).toBe('upstream_error');
+    expect(new ExitWithCode(ExitCode.Upstream, { code: 'upstream_error' }).message).toBe(
+      'upstream_error',
+    );
+  });
+});
+
+describe('exitCodeFor', () => {
+  it('maps auth failures to 4 so cron can branch on re-authentication', () => {
+    expect(exitCodeFor('AUTH_REQUIRED')).toBe(4);
+  });
+
+  it('maps every upstream-ish failure to 5', () => {
+    for (const c of [
+      'ACCESS_DENIED',
+      'NOT_FOUND',
+      'LOCKED',
+      'QUOTA_EXCEEDED',
+      'UPSTREAM',
+      'TIMEOUT',
+    ] as const) {
+      expect(exitCodeFor(c)).toBe(5);
+    }
+  });
+
+  it('maps config problems to 3 and IO to 6', () => {
+    expect(exitCodeFor('CONFIG_MISSING')).toBe(3);
+    expect(exitCodeFor('CONFIG_INVALID')).toBe(3);
+    expect(exitCodeFor('IO')).toBe(6);
+  });
+});
+
+describe('CliError', () => {
+  it('converts to an ExitWithCode carrying a lowercased code', () => {
+    const e = new CliError('AUTH_REQUIRED', 'gone').toExit();
+    expect(e.code).toBe(4);
+    expect(e.payload.code).toBe('auth_required');
+  });
+
+  it('merges detail into the payload', () => {
+    const e = new CliError('NOT_FOUND', 'missing', { path: '/a' }).toExit();
+    expect(e.payload.path).toBe('/a');
   });
 });

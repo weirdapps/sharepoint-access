@@ -9,9 +9,16 @@ interface ContextInfo {
   FormDigestTimeoutSeconds?: number;
 }
 
-/** Structural type: keeps the cache testable without a real client. */
+/**
+ * Structural type: keeps the cache testable without a real client.
+ *
+ * Deliberately requires `contextInfo`, NOT `postJson`. The digest-carrying
+ * POST path calls this cache to obtain its header, so if the cache called
+ * `postJson` back it would recurse until the stack blew. Naming a distinct
+ * method makes that cycle unrepresentable.
+ */
 interface DigestSource {
-  postJson<T>(path: string, body?: unknown, extra?: Record<string, string>): Promise<T>;
+  contextInfo<T>(): Promise<T>;
 }
 
 /** Applied when SharePoint omits the timeout. Deliberately pessimistic. */
@@ -47,7 +54,7 @@ export class DigestCache {
   }
 
   private async fetch(): Promise<string> {
-    const info = await this.client.postJson<ContextInfo>('/_api/contextinfo');
+    const info = await this.client.contextInfo<ContextInfo>();
     const digest = info?.FormDigestValue;
     if (typeof digest !== 'string' || digest.length === 0) {
       throw new Error('contextinfo returned no FormDigestValue');

@@ -1,48 +1,88 @@
 #!/usr/bin/env node
 // src/cli.ts
 //
-// Entry point for sharepoint-cli.
-//
-// SCAFFOLD ONLY. Commands are registered per the phasing in
-// docs/design/project-design.md §11 and are not implemented yet:
-//
-//   Phase 1  login, auth-renew, auth-check, health-check
-//   Phase 2  ls, get, search, libraries
-//   Phase 3  mkdir, put
-//
-// Until then the CLI exposes --version and --help and exits with
-// ExitCode.NotImplemented for anything else, so nothing silently
-// pretends to work.
+// Commander wiring only. Each command is a pure function elsewhere returning a
+// plain object; this layer resolves config, builds the client, and formats.
+// Errors become a JSON payload on stderr plus a mapped exit code.
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 
+import { loadConfig, type CliConfig, type ConfigOverrides } from './config/load';
+import { CliError } from './config/errors';
+import { SharepointClient } from './http/client';
+import { DigestCache } from './sharepoint/digest';
+import { loadSession } from './session/store';
+import { emit, emitError, toExit } from './output/json';
 import { ExitCode } from './util/exit-codes';
+
+import { runLogin, runAuthRenew } from './commands/login';
+import { runAuthCheck } from './commands/auth-check';
+import { runLs } from './commands/ls';
+import { runGet } from './commands/get';
+import { runLibraries } from './commands/libraries';
+import { runSearch } from './commands/search';
+import { runMkdir } from './commands/mkdir';
+import { runPut } from './commands/put';
 
 const VERSION = '0.1.0';
 
-/** Commands the design defines, with the phase that delivers each. */
-const PLANNED: ReadonlyArray<{ name: string; phase: number; summary: string }> = [
-  { name: 'login', phase: 1, summary: 'Interactive sign-in, capture and persist the session' },
-  { name: 'auth-renew', phase: 1, summary: 'Headless silent re-capture via ESTSAUTHPERSISTENT' },
-  { name: 'auth-check', phase: 1, summary: 'Probe read, write and search surfaces' },
-  { name: 'health-check', phase: 1, summary: 'Same probes with per-probe timings, for cron' },
-  { name: 'ls', phase: 2, summary: 'List a folder' },
-  { name: 'get', phase: 2, summary: 'Download a file by path or URL' },
-  { name: 'search', phase: 2, summary: 'Search files and sites' },
-  { name: 'libraries', phase: 2, summary: 'List document libraries in a site' },
-  { name: 'mkdir', phase: 3, summary: 'Create a folder' },
-  { name: 'put', phase: 3, summary: 'Upload a file, auto-chunked above 10 MB' },
-];
+interface GlobalOpts {
+  host?: string;
+  timeout?: string;
+  loginTimeout?: string;
+  sessionFile?: string;
+  chromeChannel?: string;
+}
 
-function notImplemented(name: string, phase: number): never {
-  process.stderr.write(
-    JSON.stringify({
-      error: 'not_implemented',
-      command: name,
-      message: `"${name}" lands in phase ${phase}. See docs/design/project-design.md §11.`,
-    }) + '\n',
+export function parseIntOption(raw: string, flag: string): number {
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0 || String(n) !== raw.trim()) {
+    throw new CliError('CONFIG_INVALID', `${flag} must be a positive integer, got "${raw}"`);
+  }
+  return n;
+}
+
+function configFrom(program: Command): CliConfig {
+  const g = program.opts<GlobalOpts>();
+  const overrides: ConfigOverrides = {};
+  if (g.host) overrides.host = g.host;
+  if (g.sessionFile) overrides.sessionPath = g.sessionFile;
+  if (g.chromeChannel) overrides.chromeChannel = g.chromeChannel;
+  if (g.timeout) overrides.httpTimeoutMs = parseIntOption(g.timeout, '--timeout');
+  if (g.loginTimeout) overrides.loginTimeoutMs = parseIntOption(g.loginTimeout, '--login-timeout');
+  return loadConfig(overrides);
+}
+
+async function clientFrom(config: CliConfig): Promise<SharepointClient> {
+  const session = await loadSession(config.sessionPath);
+  if (!session) {
+    throw new CliError(
+      'AUTH_REQUIRED',
+      `no session at ${config.sessionPath}: run "sharepoint-cli login --host ${config.host}"`,
+    );
+  }
+  // The stored session may have been captured against the other host in the
+  // pair. Cookies cover both (parent-domain scope), so retarget the host
+  // rather than forcing a pointless re-login.
+  const client = new SharepointClient(
+    { ...session, host: config.host },
+    { httpTimeoutMs: config.httpTimeoutMs },
   );
-  process.exit(ExitCode.NotImplemented);
+  const digest = new DigestCache(client);
+  client.setDigestProvider((force) => digest.get(force));
+  return client;
+}
+
+/** Single error boundary: every action body runs inside this. */
+async function run(fn: () => Promise<unknown>): Promise<void> {
+  try {
+    emit(await fn());
+    process.exitCode = ExitCode.Success;
+  } catch (err) {
+    const { code, payload } = toExit(err);
+    emitError(payload);
+    process.exitCode = code;
+  }
 }
 
 export function buildProgram(): Command {
@@ -50,24 +90,105 @@ export function buildProgram(): Command {
 
   program
     .name('sharepoint-cli')
-    .description('CLI for SharePoint Online via a captured browser session')
-    .version(VERSION);
+    .description(
+      'CLI for SharePoint Online and OneDrive for Business via a captured browser session',
+    )
+    .version(VERSION)
+    .addOption(
+      new Option(
+        '--host <host>',
+        'tenant host, e.g. <tenant>.sharepoint.com or <tenant>-my.sharepoint.com',
+      ).env('SHAREPOINT_CLI_HOST'),
+    )
+    .option('--timeout <ms>', 'per-request HTTP timeout')
+    .option('--login-timeout <ms>', 'max wait for interactive sign-in')
+    .option('--session-file <path>', 'override the session file path')
+    .option('--chrome-channel <name>', 'Playwright Chrome channel');
 
-  for (const { name, phase, summary } of PLANNED) {
-    program
-      .command(name)
-      .description(`[phase ${phase}, not implemented] ${summary}`)
-      // Swallow whatever the caller passes. Until these are built, arguments
-      // must not turn into a commander usage error (exit 1): the caller needs
-      // to see not_implemented (exit 7), not a misleading argument complaint.
-      .allowUnknownOption(true)
-      .allowExcessArguments(true)
-      .action(() => notImplemented(name, phase));
-  }
+  program
+    .command('login')
+    .description('Interactive sign-in; captures and persists the session')
+    .action(() => run(() => runLogin(configFrom(program))));
+
+  program
+    .command('auth-renew')
+    .description('Headless silent re-capture of the session')
+    .action(() => run(() => runAuthRenew(configFrom(program))));
+
+  program
+    .command('auth-check')
+    .description('Probe the read, write and search surfaces')
+    .action(() => run(async () => runAuthCheck(await clientFrom(configFrom(program)))));
+
+  program
+    .command('health-check')
+    .description('Same probes as auth-check, with timings, for cron')
+    .action(() => run(async () => runAuthCheck(await clientFrom(configFrom(program)))));
+
+  program
+    .command('ls')
+    .description('List a folder')
+    .argument('<path>', 'server-relative path')
+    .action((path: string) => run(async () => runLs(await clientFrom(configFrom(program)), path)));
+
+  program
+    .command('get')
+    .description('Download a file by server-relative path or absolute SharePoint URL')
+    .argument('<path-or-url>')
+    .option('--out <file>', 'write the bytes to this file')
+    .action((pathOrUrl: string, opts: { out?: string }) =>
+      run(async () => runGet(await clientFrom(configFrom(program)), pathOrUrl, opts.out)),
+    );
+
+  program
+    .command('libraries')
+    .description('List document libraries in the site')
+    .action(() => run(async () => runLibraries(await clientFrom(configFrom(program)))));
+
+  program
+    .command('search')
+    .description('Search files and sites')
+    .argument('<query>')
+    .option('--rows <n>', 'max results', '20')
+    .action((query: string, opts: { rows: string }) =>
+      run(async () =>
+        runSearch(
+          await clientFrom(configFrom(program)),
+          query,
+          parseIntOption(opts.rows, '--rows'),
+        ),
+      ),
+    );
+
+  program
+    .command('mkdir')
+    .description('Create one folder; parents must already exist')
+    .argument('<path>')
+    .action((path: string) =>
+      run(async () => runMkdir(await clientFrom(configFrom(program)), path)),
+    );
+
+  program
+    .command('put')
+    .description('Upload a file, auto-chunked above 10 MB')
+    .argument('<local>')
+    .argument('<remote-folder>')
+    .option('--overwrite', 'replace an existing file of the same name', false)
+    .action((local: string, remoteFolder: string, opts: { overwrite: boolean }) =>
+      run(async () =>
+        runPut(await clientFrom(configFrom(program)), local, remoteFolder, opts.overwrite),
+      ),
+    );
 
   return program;
 }
 
 if (require.main === module) {
-  buildProgram().parse(process.argv);
+  buildProgram()
+    .parseAsync(process.argv)
+    .catch((err) => {
+      const { code, payload } = toExit(err);
+      emitError(payload);
+      process.exit(code);
+    });
 }

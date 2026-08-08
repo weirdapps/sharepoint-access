@@ -1,9 +1,8 @@
 // src/util/exit-codes.ts
 //
-// Mirrors teams-access/src/util/exit-codes.ts exactly for codes 0-6 so callers
-// and cron wrappers can treat all three CLIs identically: 4 always means
-// "credentials are gone, re-authenticate", 5 always means "the far end
-// misbehaved". 7 is new here and exists only while the CLI is a scaffold.
+// Mirrors teams-access/src/util/exit-codes.ts exactly so callers and cron
+// wrappers can treat all three CLIs identically: 4 always means "credentials
+// are gone, re-authenticate", 5 always means "the far end misbehaved".
 
 export const ExitCode = {
   Success: 0,
@@ -13,8 +12,6 @@ export const ExitCode = {
   AuthRequired: 4,
   Upstream: 5,
   Io: 6,
-  /** Command exists in the design but is not built yet. Remove once phase 3 lands. */
-  NotImplemented: 7,
 } as const;
 export type ExitCodeValue = (typeof ExitCode)[keyof typeof ExitCode];
 

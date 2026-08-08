@@ -16,6 +16,9 @@ type Reader = Pick<SharepointClient, 'getJson'>;
 const SELECT_PROPERTIES = 'Title,Path,FileType,LastModifiedTime,Size';
 const MAX_ROWS = 500;
 
+/** Property names that must never be taken from server-supplied cell keys. */
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 export async function runSearch(
   client: Reader,
   query: string,
@@ -38,13 +41,19 @@ export async function runSearch(
   const body = await client.getJson<SpSearchResponse>(url);
   const relevant = body.PrimaryQueryResult?.RelevantResults;
   const results = (relevant?.Table?.Rows ?? []).map((row) => {
-    const out: Record<string, string> = {};
+    // Null-prototype: Cell.Key is server-supplied and ends up as a property
+    // name, so a row keyed "__proto__" or "constructor" would otherwise reach
+    // Object.prototype. A managed-path document title can influence indexed
+    // properties, so this is reachable input, not just theory.
+    const out = Object.create(null) as Record<string, string>;
     for (const cell of row.Cells ?? []) {
       if (typeof cell.Key === 'string' && typeof cell.Value === 'string') {
+        if (FORBIDDEN_KEYS.has(cell.Key)) continue;
         out[cell.Key] = cell.Value;
       }
     }
-    return out;
+    // Back to an ordinary object so JSON.stringify and deep-equality behave.
+    return { ...out };
   });
 
   return {

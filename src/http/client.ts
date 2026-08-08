@@ -67,6 +67,18 @@ export class SharepointClient {
 
   private url(pathOrUrl: string): string {
     if (/^[a-z][a-z0-9+.-]*:/i.test(pathOrUrl)) return assertSharepointUrl(pathOrUrl).toString();
+    // A relative path MUST start with a single "/". Without the leading slash
+    // "evil.com/x" would concatenate into "https://<host>evil.com/x", pointing
+    // at a different host with our cookies attached. Without the not-"//"
+    // check, "//evil.com/x" would become a protocol-relative authority. No
+    // current caller can reach either, since every path is built by folderApi
+    // or fileApi; this stops a future one from reintroducing the hole.
+    if (!pathOrUrl.startsWith('/') || pathOrUrl.startsWith('//')) {
+      throw new CliError(
+        'CONFIG_INVALID',
+        `internal: request path must start with a single "/", got "${pathOrUrl}"`,
+      );
+    }
     return `https://${this.session.host}${pathOrUrl}`;
   }
 
@@ -146,6 +158,24 @@ export class SharepointClient {
       throw new SharepointHttpError(second.status, this.url(path), await second.text());
     }
     throw new SharepointHttpError(first.status, this.url(path), text);
+  }
+
+  /**
+   * POST /_api/contextinfo WITHOUT a digest header.
+   *
+   * This must never go through `post()`. That path asks the digest provider
+   * for a digest, and the digest provider's only way to get one is this call:
+   * routing it through `post()` recurses until the stack blows. Deliberately a
+   * distinct method rather than a flag, so the cycle cannot be reintroduced by
+   * passing the wrong argument.
+   */
+  async contextInfo<T>(): Promise<T> {
+    const resp = await this.raw('POST', '/_api/contextinfo', 'application/json;odata=nometadata');
+    if (!resp.ok) {
+      throw new SharepointHttpError(resp.status, this.url('/_api/contextinfo'), await resp.text());
+    }
+    const text = await resp.text();
+    return (text.length > 0 ? JSON.parse(text) : {}) as T;
   }
 
   async postJson<T>(path: string, body?: unknown, extra: Record<string, string> = {}): Promise<T> {
