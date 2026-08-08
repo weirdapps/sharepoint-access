@@ -4,39 +4,6 @@ Pending items first, most critical at the top. Completed items below.
 
 ## Pending
 
-### P1: Decide the config no-fallback exception before phase 1
-
-`CLAUDE.md` carries the global rule that a missing configuration setting must
-raise rather than fall back to a default. `outlook-access` recorded an explicit
-exception for three runtime-plumbing settings (`httpTimeoutMs`,
-`loginTimeoutMs`, `chromeChannel`) because forcing them on every invocation
-traded ergonomics for safety the rule was not protecting.
-
-This repo will need the same three, plus a tenant `host`. Decide and record
-before writing `src/config/load.ts`:
-
-- Do the three plumbing settings inherit the same exception? Probably yes, for
-  consistency across the sibling CLIs.
-- Is `host` plumbing or identity? It is arguably **identity**, so it should have
-  no default and should raise when absent, even though the tenant only has one
-  host in practice. A default here would silently point at the wrong tenant.
-
-Per the rule, any exception must be written into `CLAUDE.md` **before** it is
-implemented.
-
-### P2: Create the GitHub remote
-
-The repo is local only. It should be **public** in `weirdapps`, matching
-`outlook-access` and `teams-access`, which are both public. The PII gauntlet is
-what makes that safe and runs as a required CI job.
-
-Public is only safe while the docs stay generic. This repo describes the
-tenant's security posture (no Bearer issued, `/_api/v2.0` blocked, MCAS in play)
-in more detail than the siblings do, so it must never also name the
-organisation. The gauntlet blocks the tenant host but does **not** block the
-bank's name, and `outlook-access` already carries that name in tracked files.
-Keep writing `<tenant>.sharepoint.com` and avoid the org name here.
-
 ### P3: atm-recon must be migrated before anything is removed
 
 `atm-recon/scripts/sharepoint_download.py` reads
@@ -55,6 +22,13 @@ the `sharepoint-session` term and returned a false negative. Search all three
 terms (`sharepoint-host`, `download-sharepoint-link`, `sharepoint-session`)
 before declaring any repo clean.
 
+### P8: Live write path is unproven
+
+`mkdir` and `put` have complete unit coverage and the write capability is proven
+(the auth-check write probe mints a digest on both hosts), but no file has been
+created in a live library. Needs an operator-nominated scratch folder, ideally
+in the `-my` OneDrive rather than a shared team library.
+
 ### P4: Cold-profile login is unproven
 
 The capture code being ported from `outlook-access` assumes a **warm** context
@@ -63,10 +37,12 @@ navigates and expects silent completion. Standalone, the first `login` meets the
 full interactive redirect chain including MFA. This is the single largest
 unknown in the design and is why phase 1 exists on its own.
 
-### P5: Remove `ExitCode.NotImplemented` once phase 3 lands
+### P7: Whole-file buffering caps practical file size
 
-Code 7 exists only while the CLI is a scaffold. It diverges from the 0-6 range
-shared with `outlook-cli` and `teams-cli` and must not outlive the scaffold.
+`put` reads the entire local file into memory and `getBinary` buffers the whole
+response. The chunked uploader slices an already-resident Buffer, so chunking
+bounds the request size but not memory: a multi-gigabyte file exhausts the heap.
+Streaming both directions is the fix. See `docs/design/security-audit.md` L1.
 
 ### P6: Sonar project must be created
 
@@ -76,4 +52,19 @@ created or the workflow is removed.
 
 ## Completed
 
-None yet.
+### P1: Config no-fallback exception (resolved 2026-08-08)
+
+Recorded in `CLAUDE.md` before implementation, as the rule requires. The four
+plumbing settings have defaults; `host` does not and raises `CONFIG_MISSING`,
+because it identifies which tenant is addressed.
+
+### P2: GitHub remote (resolved 2026-08-08)
+
+Created public at `weirdapps/sharepoint-access`, matching `outlook-access` and
+`teams-access`. The PII gauntlet is what makes public safe and runs as a
+required CI job.
+
+### P5: ExitCode.NotImplemented removed (resolved 2026-08-08)
+
+The scaffold-only code 7 is gone; the enum is back to the 0-6 range shared with
+`outlook-cli` and `teams-cli`, with a test asserting it stays that way.
