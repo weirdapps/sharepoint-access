@@ -1,0 +1,45 @@
+{
+  "name": "sharepoint-cli",
+  "version": "0.1.0",
+  "description": "TypeScript CLI for SharePoint Online via a captured browser session. Mirrors outlook-cli and teams-cli.",
+  "license": "MIT",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/cli.js",
+  "bin": {
+    "sharepoint-cli": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "prepare": "[ -d src ] && npm run build || true",
+    "cli": "ts-node src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.62.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.2",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.0.1",
+    "prettier": "^3.9.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^4.1.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

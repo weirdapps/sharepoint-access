@@ -1,0 +1,15 @@
+name: Monthly Dependency Refresh
+'on':
+  schedule:
+    - cron: '7 6 14 * *'
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  refresh:
+    uses: weirdapps/shared-workflows/.github/workflows/deps-refresh.yml@1cdc75d954fa1d60ef35937b21fccde923f42f9e  # main
+    with:
+      node_version: '22'
+      gate_cmd: npx tsc --noEmit && npm run build && npm test
+    secrets: inherit
