@@ -8,6 +8,12 @@ permissions:
   pull-requests: write
 jobs:
   refresh:
+    # Needs a PUSH_PAT repo secret. The reusable opens the PR with
+    # `secrets.PUSH_PAT || github.token`, and this repo has "Allow GitHub
+    # Actions to create and approve pull requests" off, so the GITHUB_TOKEN
+    # fallback pushes the branch and then fails the job with "GitHub Actions is
+    # not permitted to create or approve pull requests". See P10 in
+    # "Issues - Pending Items.md".
     uses: weirdapps/shared-workflows/.github/workflows/deps-refresh.yml@1cdc75d954fa1d60ef35937b21fccde923f42f9e  # main
     with:
       node_version: '22'
