@@ -26,7 +26,7 @@ import { uploadFile } from '../src/sharepoint/upload';
 
 describe('webPrefixFor', () => {
   it.each([
-    ['/personal/dimitrios_plessas_nbg_gr/Documents', '/personal/dimitrios_plessas_nbg_gr'],
+    ['/personal/user_contoso_com/Documents', '/personal/user_contoso_com'],
     ['/personal/user_x/Documents/Deep/Nested/File.docx', '/personal/user_x'],
     ['/sites/div991secb/Shared Documents', '/sites/div991secb'],
     ['/teams/someteam/Docs', '/teams/someteam'],
