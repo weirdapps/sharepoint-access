@@ -1,0 +1,23 @@
+# Added 2026-08-25. Every third-party action in this repo is pinned by commit
+# SHA, which is correct for supply-chain safety and means nothing updates on its
+# own. Without the github-actions ecosystem below, a pin is not hardened, it is
+# abandoned.
+version: 2
+updates:
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      development-dependencies:
+        dependency-type: 'development'
+      production-dependencies:
+        dependency-type: 'production'
