@@ -31,11 +31,26 @@ updates:
         update-types:
           - 'version-update:semver-major'
     groups:
+      # Listed FIRST on purpose: a dependency joins the first group it matches.
+      # @vitest/* declares an EXACT peer on vitest ('peer vitest@"4.1.11" from
+      # @vitest/coverage-v8@4.1.11'), so the family only resolves when it moves
+      # as one. The dev group below is scoped to minor/patch, which drops a
+      # major like 4 -> 5 out of it and makes dependabot open one PR per
+      # package; each of those alone is an unresolvable tree and npm ci dies
+      # with ERESOLVE before a single test runs. That is what left PRs #9 and
+      # #10 permanently red. No update-types here, so majors are included.
+      vitest:
+        patterns:
+          - 'vitest'
+          - '@vitest/*'
       development-dependencies:
         dependency-type: 'development'
         update-types:
           - 'minor'
           - 'patch'
+        exclude-patterns:
+          - 'vitest'
+          - '@vitest/*'
       production-dependencies:
         dependency-type: 'production'
         update-types:
