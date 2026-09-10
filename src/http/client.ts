@@ -134,9 +134,25 @@ export class SharepointClient {
     this.digestProvider = fn;
   }
 
+  /**
+   * COOKIE ONLY. The captured Bearer is deliberately NOT sent.
+   *
+   * `session.bearer` is scavenged from whatever request happened to be in
+   * flight during capture, so it arrives holding only the remainder of its
+   * ~1h life. The FedAuth cookie captured beside it is good for days. Sending
+   * both is strictly worse than sending the cookie alone: SharePoint prefers
+   * the Authorization header and answers 500 to EVERY `_api` call once it
+   * expires, while the cookie would still have served the request.
+   *
+   * Measured on the VPS on 2026-09-10. A session captured at 16:54:54Z carried
+   * a bearer expiring 16m45s later at 14:11:39Z; the credential push that
+   * would have replaced it failed, and at 17:25 all three auth-check probes
+   * went 500. The same session, same host, same minute, with this header
+   * removed: 200 on all three. The 15-minute sync cadence had been the only
+   * thing hiding it, by replacing each bearer just before it died.
+   */
   private baseHeaders(accept: string): Record<string, string> {
     const h: Record<string, string> = { Accept: accept };
-    if (this.session.bearer) h.Authorization = `Bearer ${this.session.bearer}`;
     if (this.session.cookies) h.Cookie = this.session.cookies;
     return h;
   }
