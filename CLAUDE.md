@@ -78,7 +78,7 @@ Each has its own Playwright profile and its own login. They share no session,
 no profile, and no lock. Do not introduce cross-repo filesystem coupling.
 
 **Status: in production since 2026-08-08.** All ten commands implemented,
-255 tests, verified live on both hosts from the Mac and the VPS.
+250 tests, verified live on both hosts from the Mac and the VPS.
 
 ## Hard constraints
 
