@@ -17,5 +17,13 @@ jobs:
     uses: weirdapps/shared-workflows/.github/workflows/deps-refresh.yml@738cb3809962f7a025db67266dad072166b7549b  # main
     with:
       node_version: '22'
+      # Node 22 ships npm 10.9.4, whose Arborist crashes on this dependency
+      # graph: `npm update` dies with "Cannot read properties of null (reading
+      # 'edgesOut')" at #loadPeerSet (build-ideal-tree.js:1289). Reproduced on
+      # the exact manifest: 10.9.4 crashes, 11.19.0 resolves 179 packages
+      # clean. Same node (v22.23.2) passed on 2026-08-17, so it is the graph
+      # that moved, not the runtime. Upgrade npm rather than node, so the gate
+      # still runs on the version ci.yml and `engines` actually target.
+      setup_cmd: npm install -g npm@11
       gate_cmd: npx tsc --noEmit && npm run build && npm test
     secrets: inherit
