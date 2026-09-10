@@ -38,12 +38,21 @@ describe('SharepointClient', () => {
     expect(headersOf(0).Authorization).toBeUndefined();
   });
 
-  it('sends Authorization when a bearer is present', async () => {
+  // The cookie is the credential; the bearer is not. Capture scavenges whatever
+  // Bearer happens to be in flight, so it arrives with only the remainder of its
+  // ~1h life -- 16m45s in the session that broke the VPS on 2026-09-10. The
+  // FedAuth cookie beside it was good for five days. Sending the dead bearer
+  // alongside the live cookie makes SharePoint answer 500 to every _api call:
+  // measured on the VPS, the identical request with the Authorization header
+  // removed returned 200. So the header is never an asset and eventually a
+  // liability, and the fix is not to send it at all.
+  it('never sends Authorization, even when the session carries a bearer', async () => {
     fetchMock.mockResolvedValue(ok({}));
     await new SharepointClient({ ...session, bearer: 'jwt' }, { httpTimeoutMs: 1000 }).getJson(
       '/_api/web',
     );
-    expect(headersOf(0).Authorization).toBe('Bearer jwt');
+    expect(headersOf(0).Authorization).toBeUndefined();
+    expect(headersOf(0).Cookie).toBe('FedAuth=aaa');
   });
 
   it('builds the URL from the session host', async () => {
