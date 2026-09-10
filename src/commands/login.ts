@@ -13,8 +13,6 @@ export interface LoginResult {
   host: string;
   sessionFile: string;
   tokenExpiresAt: string;
-  /** True when a Bearer was seen. Cookie-auth tenants report false. */
-  bearerCaptured: boolean;
   durationMs: number;
 }
 
@@ -35,7 +33,6 @@ async function capture(config: CliConfig, headless: boolean): Promise<LoginResul
       host: session.host,
       sessionFile: config.sessionPath,
       tokenExpiresAt: session.tokenExpiresAt,
-      bearerCaptured: Boolean(session.bearer),
       durationMs: Date.now() - started,
     };
   } finally {

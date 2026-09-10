@@ -14,12 +14,16 @@ const valid = {
 };
 
 describe('parseSession', () => {
-  it('accepts a cookie-only session with no bearer', () => {
-    expect(parseSession(JSON.stringify(valid)).bearer).toBeUndefined();
+  it('accepts a cookie-only session', () => {
+    expect(parseSession(JSON.stringify(valid)).cookies).toBe(valid.cookies);
   });
 
-  it('accepts a session with a bearer', () => {
-    expect(parseSession(JSON.stringify({ ...valid, bearer: 'jwt' })).bearer).toBe('jwt');
+  // Sessions minted before the bearer was dropped still carry the key, and
+  // three machines hold one each until their next renewal. An unknown key must
+  // be ignored, not rejected: refusing them would take out every consumer at
+  // once and require a manual re-login on a machine that cannot do it headlessly.
+  it('still accepts a legacy session that carries a bearer', () => {
+    expect(() => parseSession(JSON.stringify({ ...valid, bearer: 'jwt' }))).not.toThrow();
   });
 
   it('rejects an unsupported version', () => {
@@ -33,10 +37,6 @@ describe('parseSession', () => {
 
   it('rejects an empty cookies field', () => {
     expect(() => parseSession(JSON.stringify({ ...valid, cookies: '' }))).toThrowError(/cookies/);
-  });
-
-  it('rejects a non-string bearer', () => {
-    expect(() => parseSession(JSON.stringify({ ...valid, bearer: 42 }))).toThrowError(/bearer/);
   });
 
   it('rejects malformed JSON', () => {

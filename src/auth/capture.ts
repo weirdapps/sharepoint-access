@@ -9,10 +9,12 @@
 // meets the full interactive redirect chain including MFA, so interactive mode
 // polls a cheap authenticated endpoint until it answers 200.
 //
-// A missing Bearer is NOT an error: cookie-auth (MCAS-gated) tenants emit
-// none, and FedAuth/rtFa authorise on their own.
+// The cookies ARE the session. An earlier version also scavenged a Bearer out
+// of the page's own traffic and stored it; the client never sent it, and it
+// aged out inside the hour while FedAuth/rtFa stayed valid for days, so the
+// only thing it contributed was a live credential sitting unused on disk.
 
-import type { BrowserContext, Request as PWRequest } from 'playwright';
+import type { BrowserContext } from 'playwright';
 
 import { CliError } from '../config/errors';
 import type { SharepointSession } from '../session/schema';
@@ -45,48 +47,19 @@ export interface NamedCookie {
 // ── Pure helpers (unit-tested without a browser) ────────────────────────────
 
 /**
- * Match a Bearer-carrying request to the SharePoint host, whether direct or
- * rewritten by MCAS (Defender for Cloud Apps), which proxies through a
- * "<original-fqdn>.mcas.ms" domain so the host no longer prefixes the URL.
- */
-export function isSharepointBearerUrl(host: string, url: string): boolean {
-  if (url.startsWith(`https://${host}/`)) return true;
-  if (/^https:\/\/[^/]*\.mcas\.ms\//i.test(url)) {
-    const tenant = host.split('.')[0].toLowerCase();
-    // Check only the AUTHORITY, so a lookalike host cannot smuggle the tenant
-    // name through as a path segment.
-    const authority = url.slice('https://'.length).split('/')[0].toLowerCase();
-    return authority.includes(tenant) && authority.includes('sharepoint');
-  }
-  return false;
-}
-
-function decodeJwtExp(jwt: string): number | null {
-  const parts = jwt.split('.');
-  if (parts.length !== 3) return null;
-  try {
-    const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as {
-      exp?: unknown;
-    };
-    return typeof claims.exp === 'number' ? claims.exp : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * JWT exp when a Bearer exists, else the FedAuth (then rtFa) cookie expiry,
- * else a conservative window. Session cookies report expires = -1.
+ * The FedAuth (then rtFa) cookie expiry, else a conservative window. Session
+ * cookies report expires = -1.
+ *
+ * This used to prefer the Bearer's JWT exp, and that made the field describe a
+ * credential the client does not send. The session captured on 2026-09-10 at
+ * 16:54:54Z advertised 14:11:39Z, sixteen minutes and forty-five seconds, while
+ * the FedAuth cookie beside it was valid until 09-15. Every consumer reading
+ * tokenExpiresAt was told a five-day session had a quarter of an hour left.
  */
 export function deriveTokenExpiry(
-  bearer: string | undefined,
   cookies: ExpiringCookie[],
   now: () => number = () => Date.now(),
 ): string {
-  if (bearer) {
-    const exp = decodeJwtExp(bearer);
-    if (exp !== null) return new Date(exp * 1000).toISOString();
-  }
   for (const name of ['FedAuth', 'rtFa']) {
     const c = cookies.find((k) => k.name.toLowerCase() === name.toLowerCase());
     if (c && typeof c.expires === 'number' && c.expires > 0) {
@@ -143,19 +116,9 @@ export async function captureSession(opts: CaptureOptions): Promise<SharepointSe
     args: ['--no-first-run', '--no-default-browser-check'],
   });
 
-  let capturedAuth: string | null = null;
-  const onRequest = (req: PWRequest): void => {
-    if (capturedAuth) return;
-    try {
-      if (!isSharepointBearerUrl(opts.host, req.url())) return;
-      const header = req.headers()['authorization'] ?? '';
-      if (/^Bearer\s+/i.test(header)) capturedAuth = header;
-    } catch {
-      /* best-effort: a malformed request must not abort capture */
-    }
-  };
-  context.on('request', onRequest);
-
+  // No Bearer is scavenged from the page's traffic any more. The client sends
+  // cookies only, so a captured Bearer was an unused credential written to disk
+  // on three machines and copied between them every fifteen minutes.
   try {
     const page = await context.newPage();
     try {
@@ -187,30 +150,24 @@ export async function captureSession(opts: CaptureOptions): Promise<SharepointSe
       );
     }
 
-    const bearer = capturedAuth ? (capturedAuth as string).replace(/^Bearer\s+/i, '') : undefined;
     const all = await context.cookies();
     const cookies = collectCookieHeader(all, opts.host);
 
-    if (!bearer && !cookies) {
+    if (!cookies) {
       throw new CliError(
         'AUTH_REQUIRED',
-        `no SharePoint auth captured for ${opts.host}: no Bearer and no cookies`,
+        `no SharePoint auth captured for ${opts.host}: no cookies`,
       );
     }
 
     return {
       version: 1,
       host: opts.host,
-      ...(bearer ? { bearer } : {}),
       cookies,
       capturedAt: new Date().toISOString(),
-      tokenExpiresAt: deriveTokenExpiry(
-        bearer,
-        all.filter((c) => c.domain.includes('sharepoint.com')),
-      ),
+      tokenExpiresAt: deriveTokenExpiry(all.filter((c) => c.domain.includes('sharepoint.com'))),
     };
   } finally {
-    context.off('request', onRequest);
     await context.close().catch(() => {
       /* tolerate teardown races */
     });

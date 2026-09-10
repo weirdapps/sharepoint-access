@@ -23,7 +23,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
-          node-version: '20'
+          # 22, matching ci.yml. At 20 this job silently measured nothing:
+          # src/http/client.ts imports undici, undici 8 calls
+          # webidl.util.markAsUncloneable, and Node 20 has no such function, so
+          # the four spec files that reach the client died at import with
+          # "TypeError: webidl.util.markAsUncloneable is not a function".
+          # `continue-on-error` on the coverage step below swallowed it, the
+          # lcov went up short, and the quality gate reported 0.0% coverage on
+          # new code for a change whose new code is 100% covered.
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies

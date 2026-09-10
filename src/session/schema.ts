@@ -9,16 +9,18 @@ export interface SharepointSession {
   /** SharePoint host, e.g. "<tenant>.sharepoint.com" or "<tenant>-my.sharepoint.com". */
   host: string;
   /**
-   * Bearer token (no "Bearer " prefix). Optional: cookie-authenticated tenants
-   * never emit one, and the FedAuth/rtFa cookies authorise on their own. Sent
-   * as an Authorization header when present.
+   * Serialized cookie header value, e.g. "FedAuth=…; rtFa=…".
+   *
+   * This is the ONLY credential. There used to be an optional `bearer` beside
+   * it, scavenged from the page's own traffic during capture; it was dropped
+   * because the client never sent it and it expired inside the hour while the
+   * cookies stayed valid for days. Sessions written before that change still
+   * carry the key, and parseSession ignores it rather than rejecting them.
    */
-  bearer?: string;
-  /** Serialized cookie header value, e.g. "FedAuth=…; rtFa=…". */
   cookies: string;
   /** ISO-8601 UTC timestamp of capture. */
   capturedAt: string;
-  /** ISO-8601 UTC. From the JWT exp when a bearer exists, else cookie expiry. */
+  /** ISO-8601 UTC. The FedAuth (then rtFa) cookie expiry. */
   tokenExpiresAt: string;
 }
 
@@ -48,9 +50,6 @@ export function parseSession(json: string): SharepointSession {
     if (typeof obj[key] !== 'string' || (obj[key] as string).length === 0) {
       throw new SessionParseError(`Missing or invalid "${key}"`);
     }
-  }
-  if (obj.bearer !== undefined && typeof obj.bearer !== 'string') {
-    throw new SessionParseError('Invalid "bearer" (must be a string when present)');
   }
   return obj as unknown as SharepointSession;
 }
