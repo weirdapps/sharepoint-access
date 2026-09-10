@@ -8,6 +8,7 @@
 // way teams-cli's pair does.
 
 import type { SharepointClient } from '../http/client';
+import { SharepointHttpError } from '../http/errors';
 
 export type ProbeName = 'read' | 'write' | 'search';
 
@@ -25,6 +26,30 @@ export interface AuthCheckResult {
 
 type Prober = Pick<SharepointClient, 'getJson' | 'contextInfo'>;
 
+/** Longest body excerpt worth putting in a probe detail. */
+const MAX_BODY_EXCERPT = 240;
+
+/**
+ * A status is not a diagnosis.
+ *
+ * SharepointHttpError keeps the response body off its message on purpose: a
+ * body can echo request content and callers log messages. That rule holds
+ * everywhere except here. auth-check issues three FIXED, content-free requests
+ * (`_api/web?$select=Title`, `_api/contextinfo`, a `querytext='test'` search),
+ * so there is nothing of ours for the body to echo, and this is the surface the
+ * estate page reads.
+ *
+ * On 2026-09-10 all three probes reported the bare string "SharePoint 500". The
+ * body SharePoint had sent was "The token being parsed does not have an
+ * issuer." -- the answer, discarded one layer below the operator.
+ */
+function explain(err: unknown): string {
+  const msg = (err as Error).message;
+  if (!(err instanceof SharepointHttpError) || !err.body) return msg;
+  const excerpt = err.body.replace(/\s+/g, ' ').trim().slice(0, MAX_BODY_EXCERPT);
+  return excerpt ? `${msg}: ${excerpt}` : msg;
+}
+
 async function timed(name: ProbeName, fn: () => Promise<unknown>): Promise<Probe> {
   const started = Date.now();
   try {
@@ -34,7 +59,7 @@ async function timed(name: ProbeName, fn: () => Promise<unknown>): Promise<Probe
     return {
       name,
       ok: false,
-      detail: (err as Error).message,
+      detail: explain(err),
       durationMs: Date.now() - started,
     };
   }

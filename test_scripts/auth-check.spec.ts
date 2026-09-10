@@ -1,6 +1,59 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { runAuthCheck } from '../src/commands/auth-check';
+import { SharepointHttpError } from '../src/http/errors';
+
+// SharepointHttpError deliberately keeps the response body OFF its message,
+// because callers log messages and a body can echo request content. That rule
+// is right in general and starved the operator here: on 2026-09-10 all three
+// probes reported the bare string "SharePoint 500" and nothing else, so the
+// estate page told its reader SharePoint was broken while the real fault was a
+// credential of ours. The body SharePoint actually sent that day was "The token
+// being parsed does not have an issuer."
+//
+// auth-check is the one caller where including it is unconditionally safe: its
+// three URLs are fixed, carry no user content, and cannot echo anything back.
+describe('probe detail carries the server explanation', () => {
+  const failing = (err: Error) => ({
+    getJson: vi.fn().mockRejectedValue(err),
+    contextInfo: vi.fn().mockRejectedValue(err),
+  });
+
+  it('appends the response body to the probe detail', async () => {
+    const err = new SharepointHttpError(
+      500,
+      'https://x.sharepoint.com/_api/web',
+      'The token being parsed does not have an issuer.',
+    );
+    const r = await runAuthCheck(failing(err) as never);
+    const read = r.probes.find((p) => p.name === 'read');
+    expect(read?.detail).toContain('SharePoint 500');
+    expect(read?.detail).toContain('does not have an issuer');
+  });
+
+  it('collapses a multi-line body to one line and bounds its length', async () => {
+    const err = new SharepointHttpError(
+      500,
+      'https://x.sharepoint.com/_api/web',
+      'a\nb'.padEnd(900, 'x'),
+    );
+    const r = await runAuthCheck(failing(err) as never);
+    const detail = r.probes.find((p) => p.name === 'read')?.detail ?? '';
+    expect(detail).not.toContain('\n');
+    expect(detail.length).toBeLessThan(400);
+  });
+
+  it('leaves the detail alone when the server sent no body', async () => {
+    const err = new SharepointHttpError(500, 'https://x.sharepoint.com/_api/web', '');
+    const r = await runAuthCheck(failing(err) as never);
+    expect(r.probes.find((p) => p.name === 'read')?.detail).toBe(err.message);
+  });
+
+  it('leaves a non-HTTP error untouched', async () => {
+    const r = await runAuthCheck(failing(new Error('request timed out')) as never);
+    expect(r.probes.find((p) => p.name === 'read')?.detail).toBe('request timed out');
+  });
+});
 
 const okClient = () => ({
   getJson: vi.fn().mockResolvedValue({ Title: 'T' }),
