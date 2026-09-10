@@ -4,40 +4,6 @@ Pending items first, most critical at the top. Completed items below.
 
 ## Pending
 
-### P10: Monthly Dependency Refresh cannot open its PR (no `PUSH_PAT`)
-
-`Monthly Dependency Refresh` is red and will stay red on every monthly cron.
-Run 31781189860 (2026-08-14) refreshed the lockfile, passed the gate
-(`npx tsc --noEmit`, `npm run build`, 255 tests), pushed `deps/monthly-refresh`,
-then failed in `Open PR with refreshed lockfile`:
-
-```text
-##[error]GitHub Actions is not permitted to create or approve pull requests.
-```
-
-The shared reusable opens the PR with `secrets.PUSH_PAT || github.token`
-(`weirdapps/shared-workflows` `deps-refresh.yml` line 68, pinned here at
-`1cdc75d9`). This repo has no secrets at all, so it falls back to
-`GITHUB_TOKEN`, and `can_approve_pull_request_reviews` is `false` on this repo,
-which rejects the create call outright. `etoro_census` calls the same pinned
-SHA with the same `secrets: inherit` and its refresh PR merges; the only
-difference is that it carries a `PUSH_PAT`.
-
-Fix: add a `PUSH_PAT` repo secret, a fine-grained PAT with Contents,
-Pull requests and Workflows read/write, via
-`gh secret set PUSH_PAT -R weirdapps/sharepoint-access`, then re-run the
-workflow through `workflow_dispatch`. No YAML in this repo needs to change.
-
-Enabling "Allow GitHub Actions to create and approve pull requests" is not a
-substitute. It would let the PR be created, but a PR authored by
-`github-actions[bot]` parks every `pull_request` run at `action_required` with
-an empty check rollup, so the PR could never be verified or merged. That is the
-same failure wearing green, and it also grants Actions the right to approve
-pull requests on a public repo.
-
-Leftover: `deps/monthly-refresh` (`0e3e273`) is still on the remote with no PR
-attached. Delete it once the refresh is regenerated under the PAT identity.
-
 ### P9: Strip SharePoint from outlook-access (F-501), after one clean cycle
 
 Everything this was gated on is done. Held back deliberately: the session
@@ -71,6 +37,46 @@ bounds the request size but not memory: a multi-gigabyte file exhausts the heap.
 Streaming both directions is the fix. See `docs/design/security-audit.md` L1.
 
 ## Completed
+
+### P10: Monthly Dependency Refresh is green (resolved 2026-09-10)
+
+Two independent causes, found a month apart.
+
+**Cause 1, the PR step (2026-08-14).** Run 31781189860 refreshed the lockfile,
+passed the gate (`npx tsc --noEmit`, `npm run build`, 250 tests), pushed
+`deps/monthly-refresh`, then failed in `Open PR with refreshed lockfile`:
+
+```text
+##[error]GitHub Actions is not permitted to create or approve pull requests.
+```
+
+The shared reusable opens the PR with `secrets.PUSH_PAT || github.token`. This
+repo carried no secrets, and `can_approve_pull_request_reviews` is `false`
+here, so the create call was rejected outright after the branch had already
+been pushed. Fixed by adding the `PUSH_PAT` repo secret on 2026-08-25. No YAML
+in this repo changed.
+
+Enabling "Allow GitHub Actions to create and approve pull requests" was
+rejected as a substitute. It would let the PR be created, but a PR authored by
+`github-actions[bot]` parks every `pull_request` run at `action_required` with
+an empty check rollup, so the PR could never be verified or merged. That is the
+same failure wearing green, and it also grants Actions the right to approve
+pull requests on a public repo.
+
+**Cause 2, the refresh step (2026-09-10).** With the PAT in place, dispatch
+34508772891 still went red one step earlier. Node 22 ships npm 10.9.4, whose
+Arborist crashes on this dependency graph: `npm update` dies with
+`Cannot read properties of null (reading 'edgesOut')` at `#loadPeerSet`. The
+same Node passed on 2026-08-17, so the graph moved, not the runtime. Fixed
+in #15 with `setup_cmd: npm install -g npm@11`, upgrading npm rather than
+Node, so the gate still runs the version `ci.yml` and `engines` target.
+
+Proof: dispatch 34510455703 (2026-09-10 17:48Z) went green and opened PR #16,
+authored by `weirdapps` rather than `github-actions[bot]`, which is the PAT
+identity this whole item was about. Re-confirmed by dispatch 34511897350,
+and #16 merged as `2b63b56`. The stale `deps/monthly-refresh` (`0e3e273`)
+leftover is gone, regenerated under the PAT and deleted on merge. Next
+scheduled run 2026-09-14 06:07Z.
 
 ### P3: atm-recon migrated (resolved 2026-08-08)
 
