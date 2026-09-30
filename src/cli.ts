@@ -19,6 +19,7 @@ import { runLogin, runAuthRenew } from './commands/login';
 import { runAuthCheck } from './commands/auth-check';
 import { runLs } from './commands/ls';
 import { runGet } from './commands/get';
+import { runPage } from './commands/page';
 import { runLibraries } from './commands/libraries';
 import { runSearch } from './commands/search';
 import { runMkdir } from './commands/mkdir';
@@ -148,13 +149,23 @@ export function buildProgram(): Command {
 
   program
     .command('get')
-    .description('Download a file by server-relative path or absolute SharePoint URL')
+    .description(
+      'Download a file by server-relative path or absolute SharePoint URL, sharing and viewer links included',
+    )
     .argument('<path-or-url>')
     .option('--out <file>', 'write the bytes to this file')
     .action((pathOrUrl: string, opts: { out?: string }) =>
       run(async () =>
         runGet(await clientFrom(configFrom(program)), pathOrUrl, opts.out, siteFrom(program)),
       ),
+    );
+
+  program
+    .command('page')
+    .description("Read an intranet page's title and content (HTML)")
+    .argument('<url-or-path>')
+    .action((urlOrPath: string) =>
+      run(async () => runPage(await clientFrom(configFrom(program)), urlOrPath, siteFrom(program))),
     );
 
   program

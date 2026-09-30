@@ -7,6 +7,7 @@ import { runLs } from '../src/commands/ls';
 import { runLibraries } from '../src/commands/libraries';
 import { runSearch } from '../src/commands/search';
 import { runGet } from '../src/commands/get';
+import { runPage } from '../src/commands/page';
 import { PathError } from '../src/sharepoint/paths';
 
 const reader = (getJson: unknown) => ({ getJson }) as never;
@@ -284,5 +285,40 @@ describe('runGet with sharing and viewer links', () => {
       runGet(binReader(getBinary), 'https://x.sharepoint.com/sites/news/SitePages/Launch.aspx'),
     ).rejects.toMatchObject({ code: 'NOT_A_FILE' });
     expect(getBinary).not.toHaveBeenCalled();
+  });
+});
+
+describe('runPage', () => {
+  const PAGE = 'https://x.sharepoint.com/:u:/r/sites/news/SitePages/Launch.aspx?e=1';
+
+  it('reads the page fields from the web that owns the page', async () => {
+    const getJson = vi
+      .fn()
+      .mockResolvedValue({ Title: 'Launch', CanvasContent1: '<div>Hello</div>', WikiField: null });
+    const r = await runPage(reader(getJson), PAGE);
+    const url = getJson.mock.calls[0][0] as string;
+    expect(url.startsWith('https://x.sharepoint.com/sites/news/_api/web/')).toBe(true);
+    expect(url).toContain('/ListItemAllFields?$select=Title,CanvasContent1,WikiField');
+    expect(r).toEqual({
+      source: PAGE,
+      path: '/sites/news/SitePages/Launch.aspx',
+      title: 'Launch',
+      html: '<div>Hello</div>',
+    });
+  });
+
+  it('falls back to the wiki field of an older page', async () => {
+    const getJson = vi
+      .fn()
+      .mockResolvedValue({ Title: 'Old', CanvasContent1: null, WikiField: '<p>Wiki text</p>' });
+    expect((await runPage(reader(getJson), PAGE)).html).toBe('<p>Wiki text</p>');
+  });
+
+  it('rejects a link that is not a page', async () => {
+    const getJson = vi.fn();
+    await expect(
+      runPage(reader(getJson), 'https://x.sharepoint.com/sites/t/Shared%20Documents/a.docx'),
+    ).rejects.toBeInstanceOf(PathError);
+    expect(getJson).not.toHaveBeenCalled();
   });
 });

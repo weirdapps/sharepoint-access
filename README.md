@@ -41,7 +41,8 @@ table is in the design doc.
 | `auth-check`   | Probe the read, write and search surfaces                      |
 | `health-check` | Same probes with timings, for cron                             |
 | `ls`           | List a folder                                                  |
-| `get`          | Download a file by server-relative path or absolute URL        |
+| `get`          | Download a file by path or URL; sharing and viewer links too   |
+| `page`         | An intranet page's title and content (HTML), as JSON           |
 | `search`       | Search files and sites                                         |
 | `libraries`    | List document libraries in a site                              |
 | `mkdir`        | Create one folder (parents must exist)                         |
@@ -57,6 +58,9 @@ $CLI --host contoso.sharepoint.com ls "/sites/finance/Shared Documents"
 $CLI --host contoso-my.sharepoint.com ls "/personal/jane_doe_contoso_com/Documents"
 
 $CLI --host contoso.sharepoint.com get "/sites/finance/Shared Documents/q3.xlsx" --out ./q3.xlsx
+# A sharing or viewer link resolves to the file it shows; a link to a web page fails not_a_file.
+$CLI --host contoso-my.sharepoint.com get "https://contoso-my.sharepoint.com/:x:/g/personal/jane_doe_contoso_com/EQ..." --out ./q3.xlsx
+$CLI --host contoso.sharepoint.com page "https://contoso.sharepoint.com/sites/news/SitePages/Launch.aspx"
 $CLI --host contoso.sharepoint.com put ./report.docx "/sites/finance/Shared Documents"
 $CLI --host contoso.sharepoint.com search "contentclass:STS_Site" --rows 5
 ```
