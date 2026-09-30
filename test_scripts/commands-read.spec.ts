@@ -307,6 +307,73 @@ describe('runGet with sharing and viewer links', () => {
     expect(r.size).toBe(4);
   });
 
+  // A PDF or text sharing link lands on a OneDrive view in the reader's own OneDrive: no FileId,
+  // a web that is not the file's, and the file's exact path in the id parameter.
+  it('downloads the file a OneDrive view names in its id, from the web that owns it', async () => {
+    const landing = {
+      ...html(
+        '<script>var c = {"webAbsoluteUrl":"https://x-my.sharepoint.com/personal/me"};</script>',
+      ),
+      url: 'https://x-my.sharepoint.com/personal/me/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Fann%2FDocuments%2FDeck.pdf&parent=%2Fpersonal%2Fann%2FDocuments',
+    };
+    const getBinary = vi.fn().mockResolvedValueOnce(landing).mockResolvedValueOnce(file('%PDF'));
+    const r = await runGet(
+      binReader(getBinary),
+      'https://x-my.sharepoint.com/:b:/g/personal/ann/EQpdf',
+    );
+    const second = getBinary.mock.calls[1][0] as string;
+    expect(
+      second.startsWith(
+        'https://x-my.sharepoint.com/personal/ann/_api/web/GetFileByServerRelativePath',
+      ),
+    ).toBe(true);
+    expect(decodeURIComponent(second)).toContain("'/personal/ann/Documents/Deck.pdf'");
+    expect(r.filename).toBe('Deck.pdf');
+  });
+
+  it('downloads a viewed file from the page web when that web owns it', async () => {
+    const landing = {
+      ...html(
+        '<script>var c = {"webAbsoluteUrl":"https://x.sharepoint.com/sites/team/sub"};</script>',
+      ),
+      url: 'https://x.sharepoint.com/sites/team/sub/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2Fteam%2Fsub%2FShared%20Documents%2Fr.pdf',
+    };
+    const getBinary = vi.fn().mockResolvedValueOnce(landing).mockResolvedValueOnce(file('%PDF'));
+    await runGet(binReader(getBinary), 'https://x.sharepoint.com/:b:/g/sites/team/EQpdf');
+    const second = getBinary.mock.calls[1][0] as string;
+    expect(
+      second.startsWith(
+        'https://x.sharepoint.com/sites/team/sub/_api/web/GetFileByServerRelativePath',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not trust a FileId on a list view that names no file', async () => {
+    const getBinary = vi.fn().mockResolvedValue({
+      ...viewer,
+      url: 'https://x-my.sharepoint.com/personal/me/_layouts/15/onedrive.aspx',
+    });
+    await expect(
+      runGet(binReader(getBinary), 'https://x-my.sharepoint.com/:b:/g/personal/ann/EQpdf'),
+    ).rejects.toMatchObject({ code: 'NOT_A_FILE' });
+    expect(getBinary).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefers the sourcedoc of a viewer landing over the first FileId in its page', async () => {
+    const other = '11111111-2222-3333-4444-555555555555';
+    const getBinary = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...viewer,
+        url: `https://x-my.sharepoint.com/personal/ann/_layouts/15/Doc.aspx?sourcedoc=%7B${other}%7D&action=default`,
+      })
+      .mockResolvedValueOnce(file());
+    await runGet(binReader(getBinary), 'https://x-my.sharepoint.com/:w:/g/personal/ann/EQdoc');
+    expect(getBinary.mock.calls[1][0]).toBe(
+      `https://x-my.sharepoint.com/personal/ann/_api/web/GetFileById('${other}')/$value`,
+    );
+  });
+
   it('refuses an intranet page without fetching it', async () => {
     const getBinary = vi.fn();
     await expect(

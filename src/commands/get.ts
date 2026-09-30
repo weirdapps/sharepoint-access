@@ -5,7 +5,15 @@ import * as path from 'node:path';
 
 import type { SharepointClient } from '../http/client';
 import { CliError } from '../config/errors';
-import { classifyLink, filePathOf, parseViewerPage } from '../sharepoint/links';
+import {
+  classifyLink,
+  filePathOf,
+  isSingleFileView,
+  pageWebOf,
+  parseViewerPage,
+  sourcedocOf,
+  viewedPathOf,
+} from '../sharepoint/links';
 import { fileApi, normalizeServerRelative, splitParentLeaf } from '../sharepoint/paths';
 
 export interface GetResult {
@@ -31,11 +39,23 @@ function isHtml(res: Binary): boolean {
   return head.startsWith('<!doctype html') || head.startsWith('<html');
 }
 
+/** The server-relative path of the web that owns `path`: the page's own web when its path
+ * prefixes the file's, else undefined, and fileApi derives it from the path. A OneDrive view
+ * is served from the reader's own OneDrive, which does not own the file it shows. */
+function owningWeb(path: string, pageWeb: string | undefined, host: string): string | undefined {
+  if (!pageWeb) return undefined;
+  const web = new URL(pageWeb);
+  const webPath = decodeURIComponent(web.pathname).replace(/\/+$/, '');
+  const owns = path.toLowerCase().startsWith(`${webPath.toLowerCase()}/`);
+  return web.host === host && owns ? webPath : undefined;
+}
+
 /**
  * The file behind an absolute URL. It is fetched as is: a document URL answers with the file.
- * A sharing or viewer link answers with the browser page, whose context names the file and the
- * web that owns it, so the file is fetched by ID from that web. A page that names no file is
- * NOT_A_FILE, never saved as the file.
+ * A sharing or viewer link answers with a page, which names the file one of two ways. A
+ * OneDrive or library view carries the file's path in its id parameter: fetched by that path.
+ * The viewer of one file carries its FileId (the landing's sourcedoc when there is one): fetched
+ * by ID from the page's web. Any other page is NOT_A_FILE, never saved as the file.
  */
 async function fetchLink(client: Reader, url: string): Promise<{ res: Binary; name?: string }> {
   const kind = classifyLink(url);
@@ -46,13 +66,27 @@ async function fetchLink(client: Reader, url: string): Promise<{ res: Binary; na
   const leaf = document ? splitParentLeaf(document).leaf : undefined;
   const first = await client.getBinary(url);
   if (!isHtml(first)) return { res: first, ...(leaf ? { name: leaf } : {}) };
-  // Only a file link's page is a viewer. Other pages (a OneDrive view) name the files they list.
-  const context = kind === 'file' ? parseViewerPage(first.bytes.toString('utf8')) : null;
-  if (!context) {
-    throw new CliError('NOT_A_FILE', `not a file: ${url} returned a web page that names no file`);
+  const notAFile = new CliError(
+    'NOT_A_FILE',
+    `not a file: ${url} returned a web page that names no file`,
+  );
+  // Only a file link's page can name its file. Other pages (a OneDrive view) list many.
+  if (kind !== 'file') throw notAFile;
+  const landing = first.url ?? url;
+  const page = first.bytes.toString('utf8');
+  const viewed = viewedPathOf(landing);
+  if (viewed) {
+    const host = new URL(landing).host;
+    const path = normalizeServerRelative(viewed);
+    const byPath = `${fileApi(path, owningWeb(path, pageWebOf(page), host))}/$value`;
+    const res = await client.getBinary(`https://${host}${byPath}`);
+    return { res, name: splitParentLeaf(path).leaf };
   }
+  const context = parseViewerPage(page);
+  if (!context || !isSingleFileView(landing, url)) throw notAFile;
+  const fileId = sourcedocOf(landing) ?? context.fileId;
   const res = await client.getBinary(
-    `${context.webAbsoluteUrl}/_api/web/GetFileById('${context.fileId}')/$value`,
+    `${context.webAbsoluteUrl}/_api/web/GetFileById('${fileId}')/$value`,
   );
   const name = context.fileName ?? leaf;
   return { res, ...(name ? { name } : {}) };

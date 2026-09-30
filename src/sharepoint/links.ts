@@ -81,6 +81,40 @@ export function filePathOf(url: string): string | null {
   return DOCUMENT_RE.test(path) ? path : null;
 }
 
+/** The server-relative path a list view names in its id parameter: a OneDrive or library view
+ * opened on one file, where a PDF or text sharing link lands. Null when there is none. */
+export function viewedPathOf(url: string): string | null {
+  try {
+    const id = new URL(url).searchParams.get('id');
+    return id && id.startsWith('/') ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The file a viewer URL opens by ID (sourcedoc={guid}), lower-cased, or null. */
+export function sourcedocOf(url: string): string | null {
+  try {
+    const m = new RegExp(`^\\{?${GUID}\\}?$`, 'i').exec(
+      new URL(url).searchParams.get('sourcedoc') ?? '',
+    );
+    return m ? m[1].toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether the page at `landing` shows one file: the link itself, an Office viewer, or a
+ * document URL. A list view does not: its context names every file it lists. */
+export function isSingleFileView(landing: string, link: string): boolean {
+  try {
+    const path = pathOf(landing);
+    return path === pathOf(link) || VIEWER_RE.test(path) || DOCUMENT_RE.test(path);
+  } catch {
+    return false;
+  }
+}
+
 function jsonString(raw: string): string | undefined {
   try {
     return JSON.parse(`"${raw}"`) as string;
@@ -89,17 +123,19 @@ function jsonString(raw: string): string | undefined {
   }
 }
 
+/** The web a page belongs to (its context's webAbsoluteUrl), without a trailing slash. */
+export function pageWebOf(html: string): string | undefined {
+  const raw = WEB_RE.exec(html)?.[1];
+  const web = raw === undefined ? undefined : jsonString(raw);
+  return web && /^https:\/\//i.test(web) ? web.replace(/\/+$/, '') : undefined;
+}
+
 /** The file a viewer page shows, from its context, or null when the page names no file. */
 export function parseViewerPage(html: string): ViewerContext | null {
   const id = FILE_ID_RE.exec(html)?.[1] ?? SOURCEDOC_RE.exec(html)?.[1];
-  const webRaw = WEB_RE.exec(html)?.[1];
-  const web = webRaw === undefined ? undefined : jsonString(webRaw);
-  if (!id || !web || !/^https:\/\//i.test(web)) return null;
+  const web = pageWebOf(html);
+  if (!id || !web) return null;
   const nameRaw = NAME_RE.exec(html)?.[1];
   const fileName = nameRaw === undefined ? undefined : jsonString(nameRaw);
-  return {
-    fileId: id.toLowerCase(),
-    webAbsoluteUrl: web.replace(/\/+$/, ''),
-    ...(fileName ? { fileName } : {}),
-  };
+  return { fileId: id.toLowerCase(), webAbsoluteUrl: web, ...(fileName ? { fileName } : {}) };
 }

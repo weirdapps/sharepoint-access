@@ -48,6 +48,8 @@ export interface BinaryResult {
   bytes: Buffer;
   contentType: string;
   filename?: string;
+  /** The URL the answer came from, after redirects. */
+  url?: string;
 }
 
 /** Extra attempts after the first, for connection-level failures only. */
@@ -121,9 +123,33 @@ function isSignInLanding(url: string): boolean {
     return false;
   }
   return (
-    /^login\.(microsoftonline\.com|windows\.net|live\.com)$/i.test(u.hostname) ||
+    /^login\.(microsoftonline\.com|microsoft\.com|windows\.net|live\.com)$/i.test(u.hostname) ||
     /^\/(_forms\/default|_layouts\/15\/authenticate)\.aspx$/i.test(u.pathname)
   );
+}
+
+/**
+ * fetch follows redirects, so an expired session hands back the sign-in page with a 200. A
+ * redirect that ends on a sign-in page is AUTH_REQUIRED; one that leaves SharePoint for any
+ * other host is UPSTREAM, retryable. Neither is ever read as the answer.
+ */
+function assertLanding(resp: Response, requested: string): void {
+  if (!resp.redirected) return;
+  if (isSignInLanding(resp.url)) {
+    throw new CliError(
+      'AUTH_REQUIRED',
+      `redirected to sign-in: ${requested}; run "sharepoint-cli auth-renew", or "login" if that fails`,
+    );
+  }
+  let host = '';
+  try {
+    host = new URL(resp.url).hostname.toLowerCase();
+  } catch {
+    // An unparsable landing is not SharePoint either.
+  }
+  if (host !== 'sharepoint.com' && !host.endsWith('.sharepoint.com')) {
+    throw new CliError('UPSTREAM', `redirected off SharePoint (${host || resp.url}): ${requested}`);
+  }
 }
 
 export class SharepointClient {
@@ -189,6 +215,18 @@ export class SharepointClient {
   }
 
   private async raw(
+    method: 'GET' | 'POST',
+    pathOrUrl: string,
+    accept: string,
+    body?: BodyInit,
+    extra?: Record<string, string>,
+  ): Promise<Response> {
+    const resp = await this.send(method, pathOrUrl, accept, body, extra);
+    assertLanding(resp, this.url(pathOrUrl));
+    return resp;
+  }
+
+  private async send(
     method: 'GET' | 'POST',
     pathOrUrl: string,
     accept: string,
@@ -265,17 +303,11 @@ export class SharepointClient {
     if (!resp.ok) {
       throw new SharepointHttpError(resp.status, this.url(pathOrUrl), await resp.text());
     }
-    // fetch follows redirects, so an expired session hands back the sign-in page with a 200.
-    if (resp.redirected && isSignInLanding(resp.url)) {
-      throw new CliError(
-        'AUTH_REQUIRED',
-        `redirected to sign-in: ${this.url(pathOrUrl)}; run "sharepoint-cli auth-renew", or "login" if that fails`,
-      );
-    }
     return {
       bytes: Buffer.from(await resp.arrayBuffer()),
       contentType: resp.headers.get('content-type') ?? 'application/octet-stream',
       filename: parseContentDispositionFilename(resp.headers.get('content-disposition')),
+      url: resp.url || this.url(pathOrUrl),
     };
   }
 

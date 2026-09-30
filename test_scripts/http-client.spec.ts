@@ -135,6 +135,7 @@ describe('SharepointClient', () => {
   // follows. That page is not the file, and it is not "not a file" either: it is exit 4.
   it.each([
     'https://login.microsoftonline.com/common/oauth2/authorize?client_id=x',
+    'https://login.microsoft.com/common/oauth2/authorize?client_id=x',
     'https://x.sharepoint.com/_forms/default.aspx?ReturnUrl=%2f_layouts%2f15%2fAuthenticate.aspx',
   ])('reports a getBinary redirect to sign-in (%s) as auth_required', async (landing) => {
     const page = new Response('<html>Sign in</html>', {
@@ -147,6 +148,49 @@ describe('SharepointClient', () => {
     const c = new SharepointClient(session, { httpTimeoutMs: 1000 });
     await expect(c.getBinary('https://x.sharepoint.com/:x:/g/sites/t/EQabc')).rejects.toMatchObject(
       { code: 'AUTH_REQUIRED' },
+    );
+  });
+
+  // Not a sign-in we know, and not SharePoint either: retryable, never read as the page.
+  it('reports a getBinary redirect that leaves SharePoint as upstream', async () => {
+    const page = new Response('<html>elsewhere</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+    Object.defineProperty(page, 'redirected', { value: true });
+    Object.defineProperty(page, 'url', { value: 'https://contoso.mcas.ms/x' });
+    fetchMock.mockResolvedValue(page);
+    const c = new SharepointClient(session, { httpTimeoutMs: 1000 });
+    await expect(c.getBinary('https://x.sharepoint.com/:b:/g/sites/t/EQabc')).rejects.toMatchObject(
+      { code: 'UPSTREAM' },
+    );
+  });
+
+  it('reports a getJson redirect to sign-in as auth_required', async () => {
+    const page = new Response('<html>Sign in</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+    Object.defineProperty(page, 'redirected', { value: true });
+    Object.defineProperty(page, 'url', { value: 'https://login.microsoftonline.com/common/x' });
+    fetchMock.mockResolvedValue(page);
+    const c = new SharepointClient(session, { httpTimeoutMs: 1000 });
+    await expect(c.getJson('/sites/t/_api/web')).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+  });
+
+  it('returns the URL a getBinary answer landed on', async () => {
+    const page = new Response('<html>viewer</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+    Object.defineProperty(page, 'redirected', { value: true });
+    Object.defineProperty(page, 'url', {
+      value: 'https://x.sharepoint.com/_layouts/15/Doc.aspx?sourcedoc=%7Ba%7D',
+    });
+    fetchMock.mockResolvedValue(page);
+    const c = new SharepointClient(session, { httpTimeoutMs: 1000 });
+    expect((await c.getBinary('https://x.sharepoint.com/:w:/g/sites/t/EQabc')).url).toBe(
+      'https://x.sharepoint.com/_layouts/15/Doc.aspx?sourcedoc=%7Ba%7D',
     );
   });
 
