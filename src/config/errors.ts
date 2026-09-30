@@ -10,6 +10,7 @@ export type ErrorCode =
   | 'AUTH_REQUIRED'
   | 'ACCESS_DENIED'
   | 'NOT_FOUND'
+  | 'NOT_A_FILE'
   | 'LOCKED'
   | 'QUOTA_EXCEEDED'
   | 'UPSTREAM'
@@ -22,6 +23,8 @@ const EXIT_BY_CODE: Record<ErrorCode, ExitCodeValue> = {
   AUTH_REQUIRED: ExitCode.AuthRequired,
   ACCESS_DENIED: ExitCode.Upstream,
   NOT_FOUND: ExitCode.Upstream,
+  // A link that leads to a web page, not a file: say so rather than save the page as the file.
+  NOT_A_FILE: ExitCode.Upstream,
   LOCKED: ExitCode.Upstream,
   QUOTA_EXCEEDED: ExitCode.Upstream,
   UPSTREAM: ExitCode.Upstream,

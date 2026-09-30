@@ -42,6 +42,8 @@ describe('classifyLink', () => {
     [`${MY}/:v:/g/personal/ann_contoso_com/EQvideo`, 'other'],
     [`${TEAM}/sites/team`, 'other'],
     [`${TEAM}/sites/team/Shared%20Documents/Forms/AllItems.aspx`, 'other'],
+    [`${TEAM}/sites/team/_layouts/15/Doc.aspx?sourcedoc=%7B${GUID}%7D`, 'file'],
+    [`${TEAM}/sites/team/_layouts/15/xlviewer.aspx?id=x`, 'file'],
   ])('%s is %s', (url, kind) => {
     expect(classifyLink(url)).toBe(kind);
   });

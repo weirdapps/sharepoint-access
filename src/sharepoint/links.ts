@@ -23,6 +23,9 @@ const SHARING_RE = /^\/:([a-z]):\/([a-z])(\/.*)?$/i;
 
 const PAGE_RE = /\/SitePages\/[^/]+\.aspx$/i;
 
+/** Office Online viewers: the file is named in the query (sourcedoc) and in the page context. */
+const VIEWER_RE = /\/_layouts\/15\/(Doc|WopiFrame2?|xlviewer|PowerPoint)\.aspx$/i;
+
 const DOCUMENT_RE =
   /\.(docx?|docm|dotx|xlsx?|xlsm|xlsb|pptx?|pptm|ppsx|pdf|txt|csv|md|rtf|odt|ods|odp|msg|eml|zip)$/i;
 
@@ -59,9 +62,28 @@ export function classifyLink(url: string): LinkKind {
     if (letter === 'u' && m[2].toLowerCase() === 'r' && PAGE_RE.test(m[3] ?? '')) return 'page';
     return FILE_LETTERS.has(letter) ? 'file' : 'other';
   }
+  if (VIEWER_RE.test(path)) return 'file';
   if (PAGE_RE.test(path)) return 'page';
   if (DOCUMENT_RE.test(path)) return 'file';
   return 'other';
+}
+
+/** The server-relative path of a URL that names its file directly (a document URL or an r
+ * sharing link of a file type), or null when only the page behind the link can say. */
+export function filePathOf(url: string): string | null {
+  let path: string;
+  try {
+    path = pathOf(url);
+  } catch {
+    return null;
+  }
+  const m = SHARING_RE.exec(path);
+  if (m) {
+    const direct = m[2].toLowerCase() === 'r' && FILE_LETTERS.has(m[1].toLowerCase());
+    return direct && m[3] ? m[3] : null;
+  }
+  if (VIEWER_RE.test(path)) return null;
+  return DOCUMENT_RE.test(path) ? path : null;
 }
 
 function jsonString(raw: string): string | undefined {

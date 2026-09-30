@@ -193,10 +193,12 @@ describe('runGet', () => {
     expect(getBinary.mock.calls[0][0] as string).toMatch(/GetFileByServerRelativePath.*\/\$value$/);
   });
 
-  it('passes an absolute URL straight through for host checking downstream', async () => {
+  it('fetches a direct file URL by its path, on its own host', async () => {
     const getBinary = vi.fn().mockResolvedValue(bin());
-    await runGet(binReader(getBinary), 'https://x.sharepoint.com/a.docx');
-    expect(getBinary.mock.calls[0][0]).toBe('https://x.sharepoint.com/a.docx');
+    await runGet(binReader(getBinary), 'https://x-my.sharepoint.com/personal/ann/Documents/a.docx');
+    const url = getBinary.mock.calls[0][0] as string;
+    expect(url.startsWith('https://x-my.sharepoint.com/personal/ann/_api/web/')).toBe(true);
+    expect(url).toMatch(/GetFileByServerRelativePath.*\/\$value$/);
   });
 
   it('writes bytes to disk when an out path is given', async () => {
@@ -217,5 +219,70 @@ describe('runGet', () => {
   it('prefers the server-supplied filename', async () => {
     const getBinary = vi.fn().mockResolvedValue({ ...bin(), filename: 'server-name.docx' });
     expect((await runGet(binReader(getBinary), '/a/local.docx')).filename).toBe('server-name.docx');
+  });
+});
+
+describe('runGet with sharing and viewer links', () => {
+  const GUID = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  const file = (body = 'PK', filename?: string) => ({
+    bytes: Buffer.from(body),
+    contentType: 'application/octet-stream',
+    ...(filename ? { filename } : {}),
+  });
+  const html = (body: string) => ({
+    bytes: Buffer.from(body),
+    contentType: 'text/html; charset=utf-8',
+  });
+  const viewer = html(
+    `<html><script>var c = {"FileId":"${GUID}","FileName":"Budget.xlsx","webAbsoluteUrl":"https://x-my.sharepoint.com/personal/ann"};</script></html>`,
+  );
+
+  it('fetches an r sharing link by the path it carries', async () => {
+    const getBinary = vi.fn().mockResolvedValue(file());
+    await runGet(
+      binReader(getBinary),
+      'https://x.sharepoint.com/:b:/r/sites/team/Shared%20Documents/r.pdf?e=1',
+    );
+    const url = getBinary.mock.calls[0][0] as string;
+    expect(url.startsWith('https://x.sharepoint.com/sites/team/_api/web/')).toBe(true);
+    expect(decodeURIComponent(url)).toContain('/sites/team/Shared Documents/r.pdf');
+  });
+
+  it('downloads the file a viewer page names, from the web that owns it', async () => {
+    const getBinary = vi.fn().mockResolvedValueOnce(viewer).mockResolvedValueOnce(file('PK'));
+    const r = await runGet(
+      binReader(getBinary),
+      'https://x-my.sharepoint.com/:x:/g/personal/ann/EQabc',
+    );
+    expect(getBinary).toHaveBeenCalledTimes(2);
+    expect(getBinary.mock.calls[1][0]).toBe(
+      `https://x-my.sharepoint.com/personal/ann/_api/web/GetFileById('${GUID}')/$value`,
+    );
+    expect(r.filename).toBe('Budget.xlsx');
+    expect(r.size).toBe(2);
+  });
+
+  it('returns the first answer when it is already the file', async () => {
+    const getBinary = vi.fn().mockResolvedValue(file('%PDF', 'r.pdf'));
+    const r = await runGet(binReader(getBinary), 'https://x.sharepoint.com/:b:/g/sites/team/EQpdf');
+    expect(getBinary).toHaveBeenCalledTimes(1);
+    expect(r.filename).toBe('r.pdf');
+  });
+
+  it('fails not_a_file for a web page that names no file, and writes nothing', async () => {
+    const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sp-get-')), 'x.bin');
+    const getBinary = vi.fn().mockResolvedValue(html('<html><title>Sign in</title></html>'));
+    await expect(
+      runGet(binReader(getBinary), 'https://x.sharepoint.com/:x:/g/sites/team/EQabc', out),
+    ).rejects.toMatchObject({ code: 'NOT_A_FILE' });
+    expect(fs.existsSync(out)).toBe(false);
+  });
+
+  it('refuses an intranet page without fetching it', async () => {
+    const getBinary = vi.fn();
+    await expect(
+      runGet(binReader(getBinary), 'https://x.sharepoint.com/sites/news/SitePages/Launch.aspx'),
+    ).rejects.toMatchObject({ code: 'NOT_A_FILE' });
+    expect(getBinary).not.toHaveBeenCalled();
   });
 });
