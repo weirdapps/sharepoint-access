@@ -1,0 +1,88 @@
+// src/sharepoint/links.ts
+//
+// What a SharePoint URL found in mail points at, and how to reach its content.
+//
+// A sharing link (/:x:/g/...) or a viewer URL answers a plain GET with the browser page, not the
+// file. That page's context names the file (FileId) and the web that owns it (webAbsoluteUrl),
+// which is all GetFileById needs. An "r" sharing link carries the server-relative path itself.
+// The /_api/v2.0/shares endpoint would resolve any link, but it refuses a cookie session (403).
+
+export type LinkKind = 'file' | 'page' | 'other';
+
+export interface ViewerContext {
+  fileId: string;
+  webAbsoluteUrl: string;
+  fileName?: string;
+}
+
+/** Sharing-link letters that stand for a file: Word, Excel, PowerPoint, PDF, text, OneNote. */
+const FILE_LETTERS = new Set(['w', 'x', 'p', 'b', 't', 'o']);
+
+/** "/:<letter>:/<form>/<rest>", where form r carries the server-relative path. */
+const SHARING_RE = /^\/:([a-z]):\/([a-z])(\/.*)?$/i;
+
+const PAGE_RE = /\/SitePages\/[^/]+\.aspx$/i;
+
+const DOCUMENT_RE =
+  /\.(docx?|docm|dotx|xlsx?|xlsm|xlsb|pptx?|pptm|ppsx|pdf|txt|csv|md|rtf|odt|ods|odp|msg|eml|zip)$/i;
+
+const GUID = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})';
+// Quoted JSON keys only: the page's scripts also say fileId:w.FileId, which is code, not data.
+const FILE_ID_RE = new RegExp(`"FileId"\\s*:\\s*"\\{?${GUID}\\}?"`, 'i');
+const SOURCEDOC_RE = new RegExp(`sourcedoc=(?:%7B|\\{)?${GUID}`, 'i');
+const WEB_RE = /"webAbsoluteUrl"\s*:\s*"((?:[^"\\]|\\.)*)"/;
+const NAME_RE = /"FileName"\s*:\s*"((?:[^"\\]|\\.)*)"/;
+
+function pathOf(url: string): string {
+  return decodeURIComponent(new URL(url).pathname);
+}
+
+/** The percent-decoded server-relative path of a URL, query dropped, "r" sharing prefix removed. */
+export function serverRelativeFromUrl(url: string): string {
+  const path = pathOf(url);
+  const m = SHARING_RE.exec(path);
+  if (m && m[2].toLowerCase() === 'r' && m[3]) return m[3];
+  return path;
+}
+
+/** Whether a link is a file, an intranet page, or neither (home, views, settings, folders). */
+export function classifyLink(url: string): LinkKind {
+  let path: string;
+  try {
+    path = pathOf(url);
+  } catch {
+    return 'other';
+  }
+  const m = SHARING_RE.exec(path);
+  if (m) {
+    const letter = m[1].toLowerCase();
+    if (letter === 'u' && m[2].toLowerCase() === 'r' && PAGE_RE.test(m[3] ?? '')) return 'page';
+    return FILE_LETTERS.has(letter) ? 'file' : 'other';
+  }
+  if (PAGE_RE.test(path)) return 'page';
+  if (DOCUMENT_RE.test(path)) return 'file';
+  return 'other';
+}
+
+function jsonString(raw: string): string | undefined {
+  try {
+    return JSON.parse(`"${raw}"`) as string;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The file a viewer page shows, from its context, or null when the page names no file. */
+export function parseViewerPage(html: string): ViewerContext | null {
+  const id = FILE_ID_RE.exec(html)?.[1] ?? SOURCEDOC_RE.exec(html)?.[1];
+  const webRaw = WEB_RE.exec(html)?.[1];
+  const web = webRaw === undefined ? undefined : jsonString(webRaw);
+  if (!id || !web || !/^https:\/\//i.test(web)) return null;
+  const nameRaw = NAME_RE.exec(html)?.[1];
+  const fileName = nameRaw === undefined ? undefined : jsonString(nameRaw);
+  return {
+    fileId: id.toLowerCase(),
+    webAbsoluteUrl: web.replace(/\/+$/, ''),
+    ...(fileName ? { fileName } : {}),
+  };
+}
