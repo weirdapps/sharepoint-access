@@ -194,12 +194,16 @@ describe('runGet', () => {
     expect(getBinary.mock.calls[0][0] as string).toMatch(/GetFileByServerRelativePath.*\/\$value$/);
   });
 
-  it('fetches a direct file URL by its path, on its own host', async () => {
+  // Not by path: the web that owns a file cannot be read off its URL (a subsite is one segment
+  // deeper), and a plain GET of a document URL already returns the file.
+  it('fetches a direct file URL as is, and names it from its path', async () => {
     const getBinary = vi.fn().mockResolvedValue(bin());
-    await runGet(binReader(getBinary), 'https://x-my.sharepoint.com/personal/ann/Documents/a.docx');
-    const url = getBinary.mock.calls[0][0] as string;
-    expect(url.startsWith('https://x-my.sharepoint.com/personal/ann/_api/web/')).toBe(true);
-    expect(url).toMatch(/GetFileByServerRelativePath.*\/\$value$/);
+    const url =
+      'https://x.sharepoint.com/sites/hr/jobs/Lists/Roles/Attachments/3/Role%20profile.docx';
+    const r = await runGet(binReader(getBinary), url);
+    expect(getBinary).toHaveBeenCalledTimes(1);
+    expect(getBinary.mock.calls[0][0]).toBe(url);
+    expect(r.filename).toBe('Role profile.docx');
   });
 
   it('writes bytes to disk when an out path is given', async () => {
@@ -238,15 +242,18 @@ describe('runGet with sharing and viewer links', () => {
     `<html><script>var c = {"FileId":"${GUID}","FileName":"Budget.xlsx","webAbsoluteUrl":"https://x-my.sharepoint.com/personal/ann"};</script></html>`,
   );
 
-  it('fetches an r sharing link by the path it carries', async () => {
-    const getBinary = vi.fn().mockResolvedValue(file());
-    await runGet(
-      binReader(getBinary),
-      'https://x.sharepoint.com/:b:/r/sites/team/Shared%20Documents/r.pdf?e=1',
+  it('resolves an r sharing link through the viewer page it opens, subsite included', async () => {
+    const subsiteViewer = html(
+      `<script>var c = {"FileId":"${GUID}","webAbsoluteUrl":"https://x.sharepoint.com/sites/team/sub"};</script>`,
     );
-    const url = getBinary.mock.calls[0][0] as string;
-    expect(url.startsWith('https://x.sharepoint.com/sites/team/_api/web/')).toBe(true);
-    expect(decodeURIComponent(url)).toContain('/sites/team/Shared Documents/r.pdf');
+    const getBinary = vi.fn().mockResolvedValueOnce(subsiteViewer).mockResolvedValueOnce(file());
+    const url = 'https://x.sharepoint.com/:b:/r/sites/team/sub/Shared%20Documents/r.pdf?e=1';
+    const r = await runGet(binReader(getBinary), url);
+    expect(getBinary.mock.calls[0][0]).toBe(url);
+    expect(getBinary.mock.calls[1][0]).toBe(
+      `https://x.sharepoint.com/sites/team/sub/_api/web/GetFileById('${GUID}')/$value`,
+    );
+    expect(r.filename).toBe('r.pdf');
   });
 
   it('downloads the file a viewer page names, from the web that owns it', async () => {
@@ -279,6 +286,27 @@ describe('runGet with sharing and viewer links', () => {
     expect(fs.existsSync(out)).toBe(false);
   });
 
+  // A OneDrive view carries FileIds of the files it lists; fetching one would store the wrong file.
+  it('fails not_a_file for a link that is not a file, even when its page names one', async () => {
+    const getBinary = vi.fn().mockResolvedValue(viewer);
+    await expect(
+      runGet(
+        binReader(getBinary),
+        'https://x-my.sharepoint.com/personal/ann/_layouts/15/onedrive.aspx',
+      ),
+    ).rejects.toMatchObject({ code: 'NOT_A_FILE' });
+    expect(getBinary).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a link that is not a file when it answers with bytes', async () => {
+    const getBinary = vi.fn().mockResolvedValue(file('IMG1'));
+    const r = await runGet(
+      binReader(getBinary),
+      'https://x.sharepoint.com/sites/team/Assets/logo.png',
+    );
+    expect(r.size).toBe(4);
+  });
+
   it('refuses an intranet page without fetching it', async () => {
     const getBinary = vi.fn();
     await expect(
@@ -305,6 +333,13 @@ describe('runPage', () => {
       title: 'Launch',
       html: '<div>Hello</div>',
     });
+  });
+
+  it('reads a page in a subsite from that subsite', async () => {
+    const getJson = vi.fn().mockResolvedValue({ Title: 'T', CanvasContent1: '<p>x</p>' });
+    await runPage(reader(getJson), 'https://x.sharepoint.com/sites/hr/news/SitePages/3684.aspx');
+    const url = getJson.mock.calls[0][0] as string;
+    expect(url.startsWith('https://x.sharepoint.com/sites/hr/news/_api/web/')).toBe(true);
   });
 
   it('falls back to the wiki field of an older page', async () => {

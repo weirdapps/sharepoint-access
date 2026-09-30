@@ -4,7 +4,8 @@
 //
 // A sharing link (/:x:/g/...) or a viewer URL answers a plain GET with the browser page, not the
 // file. That page's context names the file (FileId) and the web that owns it (webAbsoluteUrl),
-// which is all GetFileById needs. An "r" sharing link carries the server-relative path itself.
+// which is all GetFileById needs. The owning web cannot be read off a URL: a subsite is one
+// segment deeper than a site, and nothing in the path says which segment is a library.
 // The /_api/v2.0/shares endpoint would resolve any link, but it refuses a cookie session (403).
 
 export type LinkKind = 'file' | 'page' | 'other';
@@ -68,21 +69,15 @@ export function classifyLink(url: string): LinkKind {
   return 'other';
 }
 
-/** The server-relative path of a URL that names its file directly (a document URL or an r
- * sharing link of a file type), or null when only the page behind the link can say. */
+/** The server-relative path of a URL that names a document (a document URL, or an r sharing
+ * link to one), or null when only the page behind the link can say. */
 export function filePathOf(url: string): string | null {
   let path: string;
   try {
-    path = pathOf(url);
+    path = serverRelativeFromUrl(url);
   } catch {
     return null;
   }
-  const m = SHARING_RE.exec(path);
-  if (m) {
-    const direct = m[2].toLowerCase() === 'r' && FILE_LETTERS.has(m[1].toLowerCase());
-    return direct && m[3] ? m[3] : null;
-  }
-  if (VIEWER_RE.test(path)) return null;
   return DOCUMENT_RE.test(path) ? path : null;
 }
 

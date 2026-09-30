@@ -25,6 +25,13 @@ interface PageFields {
 
 type Reader = Pick<SharepointClient, 'getJson'>;
 
+/** SitePages sits at the root of the web that owns the page, so the web is the path before it.
+ * Deriving it from the first two segments misses a subsite, and SharePoint answers that 500. */
+function webOfPage(path: string): string | undefined {
+  const i = path.toLowerCase().indexOf('/sitepages/');
+  return i >= 0 ? path.slice(0, i) : undefined;
+}
+
 function isAbsoluteUrl(s: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(s);
 }
@@ -35,7 +42,8 @@ export async function runPage(client: Reader, url: string, site?: string): Promi
   if (!/\.aspx$/i.test(path)) {
     throw new PathError(`page: "${url}" is not a page (.aspx)`);
   }
-  const api = `${fileApi(path, site)}/ListItemAllFields?$select=Title,CanvasContent1,WikiField`;
+  const web = site ?? webOfPage(path);
+  const api = `${fileApi(path, web)}/ListItemAllFields?$select=Title,CanvasContent1,WikiField`;
   const fields = await client.getJson<PageFields>(
     absolute ? `https://${new URL(url).host}${api}` : api,
   );

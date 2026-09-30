@@ -131,6 +131,39 @@ describe('SharepointClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // An expired session answers a browser link with a redirect to the sign-in page, which fetch
+  // follows. That page is not the file, and it is not "not a file" either: it is exit 4.
+  it.each([
+    'https://login.microsoftonline.com/common/oauth2/authorize?client_id=x',
+    'https://x.sharepoint.com/_forms/default.aspx?ReturnUrl=%2f_layouts%2f15%2fAuthenticate.aspx',
+  ])('reports a getBinary redirect to sign-in (%s) as auth_required', async (landing) => {
+    const page = new Response('<html>Sign in</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+    Object.defineProperty(page, 'redirected', { value: true });
+    Object.defineProperty(page, 'url', { value: landing });
+    fetchMock.mockResolvedValue(page);
+    const c = new SharepointClient(session, { httpTimeoutMs: 1000 });
+    await expect(c.getBinary('https://x.sharepoint.com/:x:/g/sites/t/EQabc')).rejects.toMatchObject(
+      { code: 'AUTH_REQUIRED' },
+    );
+  });
+
+  it('returns a getBinary answer that was redirected within SharePoint', async () => {
+    const page = new Response('<html>viewer</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+    Object.defineProperty(page, 'redirected', { value: true });
+    Object.defineProperty(page, 'url', { value: 'https://x.sharepoint.com/_layouts/15/Doc.aspx' });
+    fetchMock.mockResolvedValue(page);
+    const c = new SharepointClient(session, { httpTimeoutMs: 1000 });
+    expect((await c.getBinary('https://x.sharepoint.com/:w:/g/sites/t/EQabc')).contentType).toBe(
+      'text/html',
+    );
+  });
+
   it('allows a getBinary absolute URL on a sharepoint.com host', async () => {
     fetchMock.mockResolvedValue(new Response('bytes', { status: 200 }));
     const c = new SharepointClient(session, { httpTimeoutMs: 1000 });

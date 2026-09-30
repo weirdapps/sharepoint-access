@@ -112,6 +112,20 @@ export function assertSharepointUrl(raw: string): URL {
   return u;
 }
 
+/** Where an expired session's browser request lands: Microsoft's sign-in, or SharePoint's own. */
+function isSignInLanding(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  return (
+    /^login\.(microsoftonline\.com|windows\.net|live\.com)$/i.test(u.hostname) ||
+    /^\/(_forms\/default|_layouts\/15\/authenticate)\.aspx$/i.test(u.pathname)
+  );
+}
+
 export class SharepointClient {
   private digestProvider: DigestProvider | null = null;
 
@@ -250,6 +264,13 @@ export class SharepointClient {
     const resp = await this.raw('GET', pathOrUrl, '*/*');
     if (!resp.ok) {
       throw new SharepointHttpError(resp.status, this.url(pathOrUrl), await resp.text());
+    }
+    // fetch follows redirects, so an expired session hands back the sign-in page with a 200.
+    if (resp.redirected && isSignInLanding(resp.url)) {
+      throw new CliError(
+        'AUTH_REQUIRED',
+        `redirected to sign-in: ${this.url(pathOrUrl)}; run "sharepoint-cli auth-renew", or "login" if that fails`,
+      );
     }
     return {
       bytes: Buffer.from(await resp.arrayBuffer()),

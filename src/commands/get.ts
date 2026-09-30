@@ -32,35 +32,30 @@ function isHtml(res: Binary): boolean {
 }
 
 /**
- * The file behind an absolute URL. A plain GET of a sharing or viewer link returns the browser
- * page, so: a URL that names its file directly is fetched by path on its own host; any other
- * link is fetched, and when the answer is a web page, the file it names is fetched by ID from
- * the web that owns it. A page that names no file is NOT_A_FILE, never saved as the file.
+ * The file behind an absolute URL. It is fetched as is: a document URL answers with the file.
+ * A sharing or viewer link answers with the browser page, whose context names the file and the
+ * web that owns it, so the file is fetched by ID from that web. A page that names no file is
+ * NOT_A_FILE, never saved as the file.
  */
-async function fetchLink(
-  client: Reader,
-  url: string,
-  site?: string,
-): Promise<{ res: Binary; name?: string }> {
-  if (classifyLink(url) === 'page') {
+async function fetchLink(client: Reader, url: string): Promise<{ res: Binary; name?: string }> {
+  const kind = classifyLink(url);
+  if (kind === 'page') {
     throw new CliError('NOT_A_FILE', `not a file: ${url} is an intranet page; read it with "page"`);
   }
-  const direct = filePathOf(url);
-  if (direct) {
-    const byPath = `${fileApi(normalizeServerRelative(direct), site)}/$value`;
-    const res = await client.getBinary(`https://${new URL(url).host}${byPath}`);
-    return { res, name: splitParentLeaf(direct).leaf };
-  }
+  const document = filePathOf(url);
+  const leaf = document ? splitParentLeaf(document).leaf : undefined;
   const first = await client.getBinary(url);
-  if (!isHtml(first)) return { res: first };
-  const context = parseViewerPage(first.bytes.toString('utf8'));
+  if (!isHtml(first)) return { res: first, ...(leaf ? { name: leaf } : {}) };
+  // Only a file link's page is a viewer. Other pages (a OneDrive view) name the files they list.
+  const context = kind === 'file' ? parseViewerPage(first.bytes.toString('utf8')) : null;
   if (!context) {
     throw new CliError('NOT_A_FILE', `not a file: ${url} returned a web page that names no file`);
   }
   const res = await client.getBinary(
     `${context.webAbsoluteUrl}/_api/web/GetFileById('${context.fileId}')/$value`,
   );
-  return { res, ...(context.fileName ? { name: context.fileName } : {}) };
+  const name = context.fileName ?? leaf;
+  return { res, ...(name ? { name } : {}) };
 }
 
 export async function runGet(
@@ -72,7 +67,7 @@ export async function runGet(
   // An absolute URL is resolved to its file (fetchLink); the client host-checks every URL
   // before attaching cookies. A server-relative path gets the $value accessor.
   const { res, name } = isAbsoluteUrl(pathOrUrl)
-    ? await fetchLink(client, pathOrUrl, site)
+    ? await fetchLink(client, pathOrUrl)
     : {
         res: await client.getBinary(`${fileApi(normalizeServerRelative(pathOrUrl), site)}/$value`),
       };
