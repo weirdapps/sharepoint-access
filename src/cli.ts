@@ -24,6 +24,9 @@ import { runLibraries } from './commands/libraries';
 import { runSearch } from './commands/search';
 import { runMkdir } from './commands/mkdir';
 import { runPut } from './commands/put';
+import { runDelete } from './commands/delete';
+import { runRmdir } from './commands/rmdir';
+import { runInventory } from './commands/inventory';
 
 const VERSION = '0.1.0';
 
@@ -148,6 +151,26 @@ export function buildProgram(): Command {
     );
 
   program
+    .command('rmdir')
+    .description('Delete one empty folder')
+    .argument('<path>', 'server-relative folder path')
+    .action((path: string) =>
+      run(async () =>
+        runRmdir(await clientFrom(configFrom(program)), path, siteFrom(program)),
+      ),
+    );
+
+  program
+    .command('inventory')
+    .description('Recursively inventory a folder tree')
+    .argument('<path>', 'server-relative root path')
+    .action((path: string) =>
+      run(async () =>
+        runInventory(await clientFrom(configFrom(program)), path, siteFrom(program)),
+      ),
+    );
+
+  program
     .command('get')
     .description(
       'Download a file by server-relative path or absolute SharePoint URL, sharing and viewer links included',
@@ -196,6 +219,14 @@ export function buildProgram(): Command {
     .argument('<path>')
     .action((path: string) =>
       run(async () => runMkdir(await clientFrom(configFrom(program)), path, siteFrom(program))),
+    );
+
+  program
+    .command('delete')
+    .description('Delete a file by server-relative path')
+    .argument('<path>', 'server-relative file path')
+    .action((path: string) =>
+      run(async () => runDelete(await clientFrom(configFrom(program)), path)),
     );
 
   program
