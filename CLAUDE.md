@@ -64,7 +64,7 @@
 ## Project overview
 
 `sharepoint-access` provides `sharepoint-cli`, a TypeScript CLI for SharePoint
-Online driven by a browser-captured session. It is the third of three sibling
+Online driven by a browser-captured session. It is one of four sibling
 repos following one identical pattern, and deviating from that pattern needs a
 reason recorded here:
 
@@ -73,11 +73,12 @@ reason recorded here:
 | `outlook-access`    | `outlook-cli`    | `~/.outlook-cli/`    | `mail` (outlook-bridge) |
 | `teams-access`      | `teams-cli`      | `~/.teams-cli/`      | `chat` (teams-bridge)   |
 | `sharepoint-access` | `sharepoint-cli` | `~/.sharepoint-cli/` | `files` (planned)       |
+| `powerbi-access`    | `powerbi-cli`    | `~/.powerbi-cli/`    | none                    |
 
 Each has its own Playwright profile and its own login. They share no session,
 no profile, and no lock. Do not introduce cross-repo filesystem coupling.
 
-**Status: in production since 2026-08-08.** All ten commands implemented,
+**Status: in production since 2026-08-08.** All eleven commands implemented,
 250 tests, verified live on both hosts from the Mac and the VPS.
 
 ## Hard constraints
@@ -116,7 +117,7 @@ assumptions that contradict them without re-probing first.
 ## Tech stack
 
 - TypeScript 6, compiled to CommonJS in `dist/`
-- Node.js >= 20
+- Node.js >= 22.19 (`engines` in `package.json`)
 - `commander` for CLI parsing, `playwright` for browser-based login
 - `vitest` for tests, ESLint + Prettier, SonarCloud
 
@@ -154,15 +155,13 @@ The PII gauntlet blocks the tenant hostname in tracked files. Write
 
 ## Exit codes
 
-`src/util/exit-codes.ts` mirrors `teams-access` exactly for 0-6, so all three
+`src/util/exit-codes.ts` mirrors `teams-access` exactly for 0-6, so all four
 CLIs can be handled identically by cron wrappers: 4 is always "re-authenticate",
-5 is always "upstream misbehaved". Code 7 (`NotImplemented`) is temporary and
-must be removed once phase 3 lands.
+5 is always "upstream misbehaved".
 
 ## Tools
 
-No tools implemented yet. Document each one here in the required format as it
-lands.
+The commands are documented in the `README.md` Commands table.
 
 ## Project-specific exceptions to global rules
 
