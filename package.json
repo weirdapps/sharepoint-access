@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "commander": "^15.0.0",
-    "undici": "^8.12.4"
+    "undici": "^8.13.1"
   },
   "optionalDependencies": {
     "playwright": "^1.65.0"
